@@ -52,20 +52,18 @@ const Index = () => {
         </div>
 
         {/* Agents Section */}
-        <section className="w-full max-w-6xl pb-16 md:pb-24"> {/* Adiciona padding na base */}
-          <div className="text-center mb-10 text-white"> {/* Trocado para texto branco */}
+        <section className="w-full max-w-6xl pb-16 md:pb-24">
+          <div className="text-center mb-10 text-white">
             <h2 className="text-3xl md:text-4xl font-bold mb-3 drop-shadow-lg">
               Agentes Inteligentes
             </h2>
-            <p className="text-lg text-white/90 max-w-2xl mx-auto drop-shadow-lg"> {/* Trocado para texto branco */}
+            <p className="text-lg text-white/90 max-w-2xl mx-auto drop-shadow-lg">
               Nossa IA especializada cuida de cada detalhe da sua viagem
             </p>
           </div>
           
-          {/* Cards com fundo semi-transparente para melhor contraste */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"> 
             {agents.map((agent, index) => (
-              // Adiciona classe para fundo semi-transparente nos cards
               <div key={index} className="bg-white/10 backdrop-blur-sm rounded-lg"> 
                 <AgentCard {...agent} />
               </div>
