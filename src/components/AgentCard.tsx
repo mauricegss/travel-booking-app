@@ -9,15 +9,20 @@ interface AgentCardProps {
 
 export const AgentCard = ({ icon: Icon, title, description }: AgentCardProps) => {
   return (
-    <Card className="group hover:shadow-xl transition-all duration-300 border-border hover:border-primary/50 bg-card">
+    // Removido bg-card, border-border, hover:border-primary/50. Adicionado text-white. Removido shadow padrão.
+    <Card className="group hover:shadow-xl transition-all duration-300 text-white bg-transparent border-none shadow-none"> 
       <CardHeader>
-        <div className="w-14 h-14 rounded-xl bg-accent flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
-          <Icon className="h-7 w-7 text-accent-foreground" />
+        {/* Fundo do ícone ajustado para melhor contraste */}
+        <div className="w-14 h-14 rounded-xl bg-white/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300">
+          {/* Cor do ícone ajustada */}
+          <Icon className="h-7 w-7 text-white" /> 
         </div>
-        <CardTitle className="text-xl text-card-foreground">{title}</CardTitle>
+        {/* Cor do título ajustada */}
+        <CardTitle className="text-xl text-white">{title}</CardTitle> 
       </CardHeader>
       <CardContent>
-        <CardDescription className="text-muted-foreground leading-relaxed">
+        {/* Cor da descrição ajustada */}
+        <CardDescription className="text-white/80 leading-relaxed"> 
           {description}
         </CardDescription>
       </CardContent>
