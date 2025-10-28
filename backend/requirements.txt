@@ -1,6 +1,8 @@
 fastapi
 uvicorn[standard]
-google-adk
 requests
 python-dotenv
 pydantic
+langchain
+langgraph
+langchain-google-genai
