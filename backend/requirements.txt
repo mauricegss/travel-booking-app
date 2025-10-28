@@ -3,3 +3,4 @@ uvicorn[standard]
 google-adk
 requests
 python-dotenv
+pydantic
