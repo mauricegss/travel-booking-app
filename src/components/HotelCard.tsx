@@ -1,24 +1,32 @@
 import { Hotel, Star, MapPin, Wifi, Coffee } from "lucide-react";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils"; // Importa cn
+import * as React from "react"; // Importa React
 
-interface HotelCardProps {
+// Adiciona className? à interface
+export interface HotelCardProps {
+  id: string; // Adiciona id para key
   name: string;
   location: string;
   rating: number;
   price: string;
   amenities: string[];
   onSelect: () => void;
+  className?: string; // Adiciona className opcional
 }
 
-export const HotelCard = ({ name, location, rating, price, amenities, onSelect }: HotelCardProps) => {
-  const amenityIcons: { [key: string]: any } = {
+// Adiciona className e ref
+export const HotelCard = React.forwardRef<HTMLDivElement, HotelCardProps>(
+  ({ name, location, rating, price, amenities, onSelect, className, ...props }, ref) => {
+  const amenityIcons: { [key: string]: React.ElementType } = { // Corrige tipo do ícone
     wifi: Wifi,
     breakfast: Coffee,
   };
 
   return (
-    <Card className="hover:shadow-lg transition-all duration-300">
+    // Aplica className ao Card e passa ref e props
+    <Card ref={ref} className={cn("hover:shadow-lg transition-all duration-300", className)} {...props}>
       <CardContent className="pt-6">
         <div className="flex items-start justify-between mb-4">
           <div className="flex-1">
@@ -44,7 +52,7 @@ export const HotelCard = ({ name, location, rating, price, amenities, onSelect }
             <div className="text-sm text-muted-foreground">por noite</div>
           </div>
         </div>
-        
+
         <div className="flex gap-3 mt-4">
           {amenities.map((amenity, index) => {
             const Icon = amenityIcons[amenity] || Wifi;
@@ -57,7 +65,7 @@ export const HotelCard = ({ name, location, rating, price, amenities, onSelect }
           })}
         </div>
       </CardContent>
-      
+
       <CardFooter>
         <Button onClick={onSelect} className="w-full bg-primary hover:bg-primary/90 text-primary-foreground">
           Selecionar Hotel
@@ -65,4 +73,5 @@ export const HotelCard = ({ name, location, rating, price, amenities, onSelect }
       </CardFooter>
     </Card>
   );
-};
+});
+HotelCard.displayName = "HotelCard"; // Adiciona displayName

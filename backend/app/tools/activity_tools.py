@@ -1,8 +1,17 @@
 from typing import List, Dict
 import random
+from langchain_core.tools import tool
+from pydantic.v1 import BaseModel, Field
 
+class ActivitySearchInput(BaseModel):
+    destination: str = Field(description="Cidade ou local de destino para atividades.")
+    start_date: str = Field(description="Data de início das atividades no formato AAAA-MM-DD.")
+    end_date: str = Field(description="Data de fim das atividades no formato AAAA-MM-DD.")
+
+@tool(args_schema=ActivitySearchInput)
 def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
-    print(f"Buscando atividades em {destination} entre {start_date} e {end_date}.")
+    """Busca por atividades e atrações no destino para o período especificado."""
+    print(f"Tool: Buscando atividades em {destination} entre {start_date} e {end_date}.")
 
     activity_titles = ["Tour Histórico", "Passeio de Barco", "Visita ao Museu Principal", "Aula de Culinária Local", "Trilha Panorâmica"]
     descriptions = ["Descubra os segredos da cidade.", "Navegue pelas águas locais.", "Explore a arte e a história.", "Aprenda a cozinhar pratos típicos.", "Caminhada com vistas incríveis."]
