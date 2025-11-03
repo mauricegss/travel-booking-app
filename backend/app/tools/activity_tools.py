@@ -2,59 +2,60 @@ from typing import List, Dict
 import os
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from tavily import TavilyClient # <-- Importar Tavily
+from tavily import TavilyClient
+from urllib.parse import urlparse # <-- ADICIONE IMPORT
 
 class ActivitySearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino para atividades.")
     start_date: str = Field(description="Data de início das atividades no formato AAAA-MM-DD.")
     end_date: str = Field(description="Data de fim das atividades no formato AAAA-MM-DD.")
 
+# --- NOVA FUNÇÃO HELPER ---
+def _get_domain(url: str) -> str:
+    if not url:
+        return "Fonte desconhecida"
+    try:
+        domain = urlparse(url).netloc
+        if domain.startswith("www."):
+            domain = domain[4:]
+        return domain
+    except Exception:
+        return "Fonte desconhecida"
+# --- FIM DA NOVA FUNÇÃO ---
+
 @tool(args_schema=ActivitySearchInput)
 def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
     """Busca por atividades e atrações na web no destino para o período especificado."""
     print(f"Tool: Buscando atividades REAIS em {destination} entre {start_date} e {end_date}.")
 
-    # 1. Inicializar o cliente Tavily
     try:
         tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
     except KeyError:
-        print("Erro: TAVILY_API_KEY não encontrada no .env")
         return [{"id": "error", "title": "API Key de Busca (Tavily) não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
 
-    # 2. Criar a query de busca
     query = f"atividades, passeios ou 'o que fazer' em {destination} para as datas {start_date} até {end_date}"
 
     try:
-        # 3. Executar a busca
-        search_response = tavily_client.search(
-            query=query,
-            search_depth="basic",
-            include_answer=False,
-            max_results=5
-        )
-        
+        search_response = tavily_client.search(query=query, search_depth="basic", include_answer=False, max_results=5)
         web_results = search_response.get("results", [])
         
-        # 4. Formatar os resultados
         formatted_results = []
         if not web_results:
-             print("Nenhum resultado encontrado na web.")
              return []
 
         for result in web_results:
-            # Mapeamos os resultados da busca para o formato do ActivityCard
+            url = result.get("url")
             formatted_results.append({
-                "id": result.get("url"), # Usamos a URL como ID
+                "id": url, 
                 "title": result.get("title", "Título não disponível"),
-                "description": result.get("content", "Sem descrição..."), # Snippet da busca
-                "duration": "N/A", # Não temos essa info da busca
-                "price": "Verificar no site", # Não temos preço confiável
-                "capacity": result.get("source", "Fonte desconhecida") # Usamos a fonte como "capacidade"
+                "description": result.get("content", "Sem descrição..."),
+                "duration": "N/A",
+                "price": "Verificar no site",
+                "capacity": _get_domain(url) # <-- MUDANÇA AQUI
             })
         
         print(f"Retornando {len(formatted_results)} opções de atividade encontradas na web.")
         return formatted_results
 
     except Exception as e:
-        print(f"Erro ao chamar a API Tavily: {e}")
         return [{"id": "error", "title": f"Erro na busca: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
