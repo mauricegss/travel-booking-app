@@ -1,7 +1,8 @@
 from typing import List, Dict
-import random
+import os
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
+from tavily import TavilyClient # <-- Importar Tavily
 
 class ActivitySearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino para atividades.")
@@ -10,22 +11,50 @@ class ActivitySearchInput(BaseModel):
 
 @tool(args_schema=ActivitySearchInput)
 def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
-    """Busca por atividades e atrações no destino para o período especificado."""
-    print(f"Tool: Buscando atividades em {destination} entre {start_date} e {end_date}.")
+    """Busca por atividades e atrações na web no destino para o período especificado."""
+    print(f"Tool: Buscando atividades REAIS em {destination} entre {start_date} e {end_date}.")
 
-    activity_titles = ["Tour Histórico", "Passeio de Barco", "Visita ao Museu Principal", "Aula de Culinária Local", "Trilha Panorâmica"]
-    descriptions = ["Descubra os segredos da cidade.", "Navegue pelas águas locais.", "Explore a arte e a história.", "Aprenda a cozinhar pratos típicos.", "Caminhada com vistas incríveis."]
-    durations = ["2h", "3h", "4h", "Meio dia"]
-    capacities = ["Até 10 pessoas", "Até 15 pessoas", "Até 20 pessoas", "Grupos pequenos"]
-    results = []
-    for i in range(random.randint(2, 5)):
-        results.append({
-            "id": f"activity_{i+1}",
-            "title": f"{random.choice(activity_titles)} em {destination}",
-            "description": random.choice(descriptions),
-            "duration": random.choice(durations),
-            "price": f"R$ {random.randint(100, 400)}",
-            "capacity": random.choice(capacities)
-        })
-    print(f"Retornando {len(results)} opções de atividade.")
-    return results
+    # 1. Inicializar o cliente Tavily
+    try:
+        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+    except KeyError:
+        print("Erro: TAVILY_API_KEY não encontrada no .env")
+        return [{"id": "error", "title": "API Key de Busca (Tavily) não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+
+    # 2. Criar a query de busca
+    query = f"atividades, passeios ou 'o que fazer' em {destination} para as datas {start_date} até {end_date}"
+
+    try:
+        # 3. Executar a busca
+        search_response = tavily_client.search(
+            query=query,
+            search_depth="basic",
+            include_answer=False,
+            max_results=5
+        )
+        
+        web_results = search_response.get("results", [])
+        
+        # 4. Formatar os resultados
+        formatted_results = []
+        if not web_results:
+             print("Nenhum resultado encontrado na web.")
+             return []
+
+        for result in web_results:
+            # Mapeamos os resultados da busca para o formato do ActivityCard
+            formatted_results.append({
+                "id": result.get("url"), # Usamos a URL como ID
+                "title": result.get("title", "Título não disponível"),
+                "description": result.get("content", "Sem descrição..."), # Snippet da busca
+                "duration": "N/A", # Não temos essa info da busca
+                "price": "Verificar no site", # Não temos preço confiável
+                "capacity": result.get("source", "Fonte desconhecida") # Usamos a fonte como "capacidade"
+            })
+        
+        print(f"Retornando {len(formatted_results)} opções de atividade encontradas na web.")
+        return formatted_results
+
+    except Exception as e:
+        print(f"Erro ao chamar a API Tavily: {e}")
+        return [{"id": "error", "title": f"Erro na busca: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]

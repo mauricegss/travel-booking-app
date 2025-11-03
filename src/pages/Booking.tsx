@@ -4,53 +4,82 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, CreditCard, Check } from "lucide-react";
+import { ArrowLeft, Check, Link as LinkIcon, Plane, Hotel, MapPinned } from "lucide-react"; // Importa ícones
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
+import { ApiActivity, ApiFlight, ApiHotel } from "@/services/api"; // Importa os novos tipos
+
+// Componente helper para criar um item da lista
+const SummaryItem = ({ icon: Icon, title, url }: { icon: React.ElementType, title: string, url: string }) => (
+  <div className="flex items-center justify-between">
+    <div className="flex items-center gap-3">
+      <Icon className="h-5 w-5 text-primary" />
+      <span className="text-sm font-medium text-foreground">{title}</span>
+    </div>
+    <Button variant="ghost" size="sm" asChild>
+      <a href={url} target="_blank" rel="noopener noreferrer">
+        <LinkIcon className="h-4 w-4 mr-2" />
+        Ver link
+      </a>
+    </Button>
+  </div>
+);
 
 const Booking = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const { destination, checkIn, checkOut, selectedFlight, selectedHotel, selectedActivities } = location.state || {};
+  
+  // Obtém os dados completos dos itens, não apenas os IDs
+  const { 
+    destination, 
+    checkIn, 
+    checkOut, 
+    flightDetails, 
+    hotelDetails, 
+    activityDetails 
+  } = (location.state || {}) as {
+    destination: string;
+    checkIn: string;
+    checkOut: string;
+    flightDetails: ApiFlight;
+    hotelDetails: ApiHotel;
+    activityDetails: ApiActivity[];
+  };
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
-  const [cardNumber, setCardNumber] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  if (!destination) {
+  if (!destination || !flightDetails || !hotelDetails) {
     navigate("/");
     return null;
   }
 
   const handleConfirmBooking = () => {
-    if (!name || !email || !cardNumber) {
+    if (!name || !email) {
       toast({
         title: "Campos obrigatórios",
-        description: "Por favor, preencha todos os campos",
+        description: "Por favor, preencha seu nome e email.",
         variant: "destructive",
       });
       return;
     }
 
     setIsProcessing(true);
-    // Simula processamento
+    // Simula o envio do resumo da pesquisa (ex: para o email do usuário)
     setTimeout(() => {
       toast({
-        title: "Reserva confirmada!",
-        description: "Você receberá um email com os detalhes da sua viagem",
+        title: "Pesquisa Salva!",
+        description: `Um resumo dos links para sua viagem para ${destination} foi salvo.`,
       });
       setIsProcessing(false);
       navigate("/");
-    }, 2000);
+    }, 1500);
   };
 
-  const flightPrice = 2450;
-  const hotelPrice = 680;
-  const activityPrice = selectedActivities?.length * 280 || 0;
-  const totalPrice = flightPrice + hotelPrice + activityPrice;
-
+  // Removemos toda a lógica de preço falso
+  
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-8">
@@ -61,20 +90,22 @@ const Booking = () => {
             Voltar
           </Button>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Confirmação de Reserva</h1>
-            <p className="text-muted-foreground">Finalize sua viagem para {destination}</p>
+            <h1 className="text-3xl font-bold text-foreground">Resumo da Pesquisa</h1>
+            <p className="text-muted-foreground">Revise os links selecionados para {destination}</p>
           </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Resumo da Reserva */}
+          {/* Informações do Usuário (Para salvar a pesquisa) */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Dados do Passageiro */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-foreground">Dados do Passageiro</CardTitle>
+                <CardTitle className="text-foreground">Salvar sua Pesquisa</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
+                <p className="text-sm text-muted-foreground">
+                  Preencha seus dados para salvar este resumo. (Isso é uma simulação)
+                </p>
                 <div>
                   <Label htmlFor="name">Nome Completo</Label>
                   <Input
@@ -97,44 +128,14 @@ const Booking = () => {
               </CardContent>
             </Card>
 
-            {/* Pagamento */}
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-foreground">
-                  <CreditCard className="h-5 w-5" />
-                  Informações de Pagamento
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div>
-                  <Label htmlFor="card">Número do Cartão</Label>
-                  <Input
-                    id="card"
-                    value={cardNumber}
-                    onChange={(e) => setCardNumber(e.target.value)}
-                    placeholder="0000 0000 0000 0000"
-                    maxLength={19}
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="expiry">Validade</Label>
-                    <Input id="expiry" placeholder="MM/AA" />
-                  </div>
-                  <div>
-                    <Label htmlFor="cvv">CVV</Label>
-                    <Input id="cvv" placeholder="123" maxLength={3} />
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            {/* Removemos o Card de Pagamento */}
           </div>
 
-          {/* Resumo do Pedido */}
+          {/* Resumo dos Itens Selecionados */}
           <div className="lg:col-span-1">
             <Card className="sticky top-8">
               <CardHeader>
-                <CardTitle className="text-foreground">Resumo do Pedido</CardTitle>
+                <CardTitle className="text-foreground">Itens Selecionados</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
@@ -146,30 +147,38 @@ const Booking = () => {
                 <Separator />
 
                 <div className="space-y-3">
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Voo</span>
-                    <span className="font-medium text-foreground">R$ {flightPrice.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-sm text-muted-foreground">Hotel</span>
-                    <span className="font-medium text-foreground">R$ {hotelPrice.toFixed(2)}</span>
-                  </div>
-                  {selectedActivities?.length > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-sm text-muted-foreground">
-                        Atividades ({selectedActivities.length})
-                      </span>
-                      <span className="font-medium text-foreground">R$ {activityPrice.toFixed(2)}</span>
-                    </div>
+                  {/* Item de Voo */}
+                  <SummaryItem 
+                    icon={Plane}
+                    title={flightDetails.airline} // Mostra a fonte
+                    url={flightDetails.id} // Link
+                  />
+                  
+                  {/* Item de Hotel */}
+                  <SummaryItem 
+                    icon={Hotel}
+                    title={hotelDetails.name} // Mostra o título
+                    url={hotelDetails.id} // Link
+                  />
+
+                  {/* Itens de Atividade */}
+                  {activityDetails?.length > 0 && (
+                    <>
+                      {activityDetails.map(activity => (
+                        <SummaryItem 
+                          key={activity.id}
+                          icon={MapPinned}
+                          title={activity.title} // Mostra o título
+                          url={activity.id} // Link
+                        />
+                      ))}
+                    </>
                   )}
                 </div>
 
                 <Separator />
 
-                <div className="flex justify-between items-center">
-                  <span className="text-lg font-bold text-foreground">Total</span>
-                  <span className="text-2xl font-bold text-primary">R$ {totalPrice.toFixed(2)}</span>
-                </div>
+                {/* Removemos o cálculo de Total */}
 
                 <Button 
                   onClick={handleConfirmBooking}
@@ -178,18 +187,14 @@ const Booking = () => {
                   size="lg"
                 >
                   {isProcessing ? (
-                    "Processando..."
+                    "Salvando..."
                   ) : (
                     <>
                       <Check className="h-5 w-5 mr-2" />
-                      Confirmar Reserva
+                      Salvar Resumo
                     </>
                   )}
                 </Button>
-
-                <p className="text-xs text-center text-muted-foreground">
-                  Ao confirmar, você concorda com nossos termos e condições
-                </p>
               </CardContent>
             </Card>
           </div>
