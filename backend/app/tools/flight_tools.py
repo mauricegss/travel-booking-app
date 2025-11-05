@@ -1,9 +1,39 @@
 from typing import List, Dict, Optional
 import os
+import requests
+import json
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from amadeus import ResponseError
-from .amadeus_client import amadeus, get_location_data # <-- Importa nosso cliente
+from functools import lru_cache
+from tavily import TavilyClient
+
+# --- Helper de Localização (só para voos) ---
+@lru_cache(maxsize=100)
+def _get_iata_code(city_name: str) -> str | None:
+    try:
+        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
+    except KeyError:
+        print("ERRO (Voos): TAVILY_API_KEY não configurada.")
+        return None
+    
+    print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
+    query = f"Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}? Responda APENAS o código de 3 letras (ex: 'GRU')."
+    
+    try:
+        response = tavily_client.search(query=query, search_depth="basic", include_answer=True)
+        answer = response.get('answer')
+        
+        if answer and len(answer) >= 3:
+            iata = answer.strip().split(" ")[0][:3] # Pega os 3 primeiros caracteres
+            print(f"Tavily (IATA) Answer: {iata}")
+            return iata
+        
+        print(f"Tavily não retornou 'answer' para o IATA de {city_name}.")
+        return None
+    except Exception as e:
+        print(f"Erro ao buscar IATA com Tavily: {e}")
+        return None
+# --- Fim do Helper ---
 
 class FlightSearchInput(BaseModel):
     origin: str = Field(description="Cidade ou aeroporto de origem.")
@@ -13,70 +43,65 @@ class FlightSearchInput(BaseModel):
     passengers: int = Field(default=1, description="Número de passageiros.")
 
 @tool(args_schema=FlightSearchInput)
-def search_flights(origin: str, destination: str, departure_date: str, return_date: Optional[str] = None, passengers: int = 1) -> List[Dict]:
-    """Busca por opções de voos na API Amadeus com base na origem, destino, datas e número de passageiros."""
-    print(f"Tool: Buscando voos REAIS (Amadeus) de {origin} para {destination}...")
+def search_flights(origin: str, destination: str, departure_date: str, **kwargs) -> List[Dict]:
+    """Busca por horários de voos na API AviationStack com base na origem e destino."""
+    print(f"Tool: Buscando voos REAIS (AviationStack) de {origin} para {destination}...")
+    
+    try:
+        API_KEY = os.environ["AVIATIONSTACK_API_KEY"]
+    except KeyError:
+        return [{"id": "error", "airline": "AVIATIONSTACK_API_KEY não configurada.", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
 
-    if not amadeus:
-        return [{"id": "error", "airline": "Cliente Amadeus não inicializado. Verifique as API keys.", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
-
-    origin_data = get_location_data(origin)
-    dest_data = get_location_data(destination)
-
-    if not origin_data or not origin_data.get('iataCode'):
+    origin_iata = _get_iata_code(origin)
+    dest_iata = _get_iata_code(destination)
+    
+    if not origin_iata:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
-    if not dest_data or not dest_data.get('iataCode'):
+    if not dest_iata:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
 
-    origin_code = origin_data['iataCode']
-    dest_code = dest_data['iataCode']
+    API_URL = "http://api.aviationstack.com/v1/flights" # HTTP no plano gratuito
+    
+    params = {
+        "access_key": API_KEY,
+        "dep_iata": origin_iata,
+        "arr_iata": dest_iata,
+        "flight_status": "scheduled", # Busca voos agendados
+        "limit": 5
+    }
 
     try:
-        search_params = {
-            'originLocationCode': origin_code,
-            'destinationLocationCode': dest_code,
-            'departureDate': departure_date,
-            'adults': passengers,
-            'nonStop': 'false',
-            'max': 5, # Pede os 5 primeiros resultados
-            'currencyCode': 'BRL' # Pede preços em Reais Brasileiros
-        }
-        if return_date:
-            search_params['returnDate'] = return_date
-
-        response = amadeus.shopping.flight_offers_search.get(**search_params)
+        response = requests.get(API_URL, params=params)
+        response.raise_for_status()
+        data = response.json().get("data", [])
         
-        dictionaries = response.result.get('dictionaries', {})
-        carriers = dictionaries.get('carriers', {})
-
         formatted_results = []
-        for offer in response.data:
-            # Pega o nome da companhia aérea do dicionário
-            airline_code = offer['itineraries'][0]['segments'][0]['carrierCode']
-            airline_name = carriers.get(airline_code, airline_code)
+        if not data:
+            return []
+
+        for flight in data:
+            airline_name = flight.get('airline', {}).get('name', 'N/A')
+            flight_number = flight.get('flight', {}).get('number', '')
             
-            # Pega a duração (ex: 'PT5H30M' -> 5H 30M)
-            duration_raw = offer['itineraries'][0]['duration'][2:].replace('H', 'H ').replace('M', 'M')
-            
-            # O frontend espera um link. Como a API não dá um, criamos um link de busca
-            fallback_url = f"https://www.google.com/flights?q=Voo+{origin_code}+para+{dest_code}+em+{departure_date}"
+            # Gera um link de fallback para o Google Flights
+            fallback_url = f"https://www.google.com/flights?q=Voo+{origin_iata}+para+{dest_iata}"
             
             formatted_results.append({
                 "id": fallback_url,
                 "airline": airline_name,
-                "departure": "N/A", # API Amadeus é complexa para horários, mantemos simples
+                "departure": "N/A",
                 "arrival": "N/A",
-                "duration": duration_raw,
-                "price": f"R$ {offer['price']['total']}",
-                "stops": len(offer['itineraries'][0]['segments']) - 1
+                "duration": f"Voo {airline_name} {flight_number}", # O plano grátis não dá duração
+                "price": "Verificar Preço", # O plano grátis não dá preço
+                "stops": 0 # O plano grátis foca em voos individuais
             })
         
-        print(f"Retornando {len(formatted_results)} opções de voo da Amadeus.")
+        print(f"Retornando {len(formatted_results)} opções de voo da AviationStack.")
         return formatted_results
 
-    except ResponseError as e:
-        print(f"Erro na API Amadeus (Voos): {e.description}")
-        return [{"id": "error", "airline": f"Erro na API de voos: {e.description}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+    except requests.exceptions.HTTPError as e:
+        print(f"Erro na API AviationStack (Voos): {e.response.text}")
+        return [{"id": "error", "airline": f"Erro na API de voos: {e.response.text}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
     except Exception as e:
         print(f"Erro inesperado (Voos): {e}")
         return [{"id": "error", "airline": f"Erro ao buscar voos: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]

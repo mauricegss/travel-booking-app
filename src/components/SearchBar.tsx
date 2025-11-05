@@ -9,8 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 export const SearchBar = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [origin, setOrigin] = useState("São Paulo"); // Define um valor padrão
-  const [destination, setDestination] = useState("");
+  const [origin, setOrigin] = useState("Rio de Janeiro"); // Define um valor para testes
+  const [destination, setDestination] = useState("Curitiba"); // Define um valor para testes
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [isLoading, setIsLoading] = useState(false);

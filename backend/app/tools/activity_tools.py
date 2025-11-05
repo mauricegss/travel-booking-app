@@ -1,72 +1,84 @@
 from typing import List, Dict
 import os
+import requests
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from amadeus import ResponseError
-from .amadeus_client import amadeus, get_location_data
+from unidecode import unidecode # <-- A IMPORTAÇÃO NECESSÁRIA
 
 class ActivitySearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino para atividades.")
     start_date: str = Field(description="Data de início das atividades no formato AAAA-MM-DD.")
     end_date: str = Field(description="Data de fim das atividades no formato AAAA-MM-DD.")
 
+# Helper para formatar data (Ticketmaster exige formato ISO 8601)
+def format_datetime_iso(date_str: str) -> str:
+    return f"{date_str}T00:00:00Z"
+
 @tool(args_schema=ActivitySearchInput)
 def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
-    """Busca por atividades e atrações na API Amadeus no destino para o período especificado."""
-    print(f"Tool: Buscando atividades REAIS (Amadeus) em {destination}...")
+    """Busca por atividades e eventos na API Ticketmaster com base no destino e datas."""
+    print(f"Tool: Buscando atividades REAIS (Ticketmaster) em {destination}...")
     
-    if not amadeus:
-        return [{"id": "error", "title": "Cliente Amadeus não inicializado. Verifique as API keys.", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+    try:
+        TICKETMASTER_API_KEY = os.environ["TICKETMASTER_API_KEY"]
+    except KeyError:
+        return [{"id": "error", "title": "TICKETMASTER_API_KEY não configurada no .env", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
 
-    dest_data = get_location_data(destination)
-    if not dest_data or not dest_data.get('geoCode'):
-         return [{"id": "error", "title": f"Não foi possível encontrar coordenadas para: {destination}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+    API_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
     
-    geo_code = dest_data['geoCode']
+    # Limpa o nome da cidade (ex: "São Paulo" -> "Sao Paulo")
+    city_normalized = unidecode(destination)
+    
+    params = {
+        "apikey": TICKETMASTER_API_KEY,
+        "city": city_normalized,
+        "startDateTime": format_datetime_iso(start_date),
+        "endDateTime": format_datetime_iso(end_date),
+        "size": 5, # Limita a 5 resultados
+        "sort": "date,asc",
+        "segmentName": "Music,Sports,Arts & Theater" # Foca em eventos
+    }
 
     try:
-        response = amadeus.shopping.activities.get(
-            latitude=geo_code['latitude'],
-            longitude=geo_code['longitude'],
-            radius=20
-        )
+        response = requests.get(API_URL, params=params)
+        response.raise_for_status()
         
-        # --- INÍCIO DA CORREÇÃO ---
-        # 1. Limita a 5 resultados
-        activities_to_process = response.data[:5]
-        # --- FIM DA CORREÇÃO ---
+        data = response.json().get("_embedded", {}).get("events", [])
         
         formatted_results = []
-        for activity in activities_to_process:
+        if not data:
+            return []
+
+        for event in data:
+            # Preço (pode não existir)
+            price_range = event.get("priceRanges", [])
             price = "Verificar no site"
-            if activity.get('price'):
-                price = f"{activity['price']['currencyCode']} {activity['price']['amount']}"
+            if price_range:
+                price = f"A partir de {price_range[0].get('min', '?')} {price_range[0].get('currency', '')}"
             
-            booking_link = activity.get('links', {}).get('booking', 'N/A')
+            # Descrição (pode não existir)
+            description = event.get('info', event.get('description', 'Sem descrição...'))
             
-            if booking_link == 'N/A':
-                 booking_link = f"https://www.google.com/search?q={activity['name'].replace(' ', '+')}"
-            
-            # --- INÍCIO DA CORREÇÃO ---
-            # 2. Usa o campo 'rating' em vez de 'capacity' (Provedor Online)
-            capacity_text = f"Avaliação: {activity.get('rating', 'N/A')}"
-            # --- FIM DA CORREÇÃO ---
-            
+            # Local (Venue)
+            venue = "Local não informado"
+            if event.get("_embedded", {}).get("venues", []):
+                venue = event["_embedded"]["venues"][0].get("name", venue)
+
             formatted_results.append({
-                "id": booking_link,
-                "title": activity['name'],
-                "description": activity.get('shortDescription', 'Sem descrição...'),
-                "duration": "N/A",
+                "id": event.get('url', '#'), # Link real do Ticketmaster
+                "title": event['name'],
+                "description": description,
+                "duration": "N/A (Evento)",
                 "price": price,
-                "capacity": capacity_text # <-- Usa o texto de avaliação
+                "capacity": f"Local: {venue}" # O frontend usa 'capacity' como "Fonte:"
             })
         
-        print(f"Retornando {len(formatted_results)} opções de atividade da Amadeus.")
+        print(f"Retornando {len(formatted_results)} opções de atividade da Ticketmaster.")
         return formatted_results
 
-    except ResponseError as e:
-        print(f"Erro na API Amadeus (Atividades): {e.description}")
-        return [{"id": "error", "title": f"Erro na API de atividades: {e.description}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+    except requests.exceptions.HTTPError as e:
+        print(f"Erro na API Ticketmaster: {e.response.text}")
+        return [{"id": "error", "title": f"Erro na API de atividades: {e.response.text}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
     except Exception as e:
         print(f"Erro inesperado (Atividades): {e}")
         return [{"id": "error", "title": f"Erro ao buscar atividades: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]

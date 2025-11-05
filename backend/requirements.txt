@@ -7,5 +7,4 @@ langchain
 langgraph
 langchain-google-genai
 tavily-python
-amadeus
 unidecode
