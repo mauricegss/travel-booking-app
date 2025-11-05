@@ -51,12 +51,9 @@ def search_activities(destination: str, **kwargs) -> List[Dict]:
     # 2. Buscar locais (atrações) perto dessas coordenadas
     PLACES_URL = "https://api.geoapify.com/v2/places"
     params = {
-        # --- MUDANÇA PRINCIPAL AQUI ---
-        # Lista de categorias VÁLIDAS da API Geoapify para turismo
-        "categories": "tourism.attraction,leisure.park,entertainment.museum,entertainment.zoo,commercial.shopping_mall,catering.restaurant", 
+        "categories": "tourism.attraction,leisure.park,entertainment.museum,entertainment.zoo,commercial.shopping_mall,catering.restaurant",
         "filter": f"circle:{coords['lon']},{coords['lat']},15000", # Raio de 15km
-        "bias": f"proximity:{coords['lon']},{coords['lat']}",
-        "limit": 10, # Aumentado para 10 para dar mais opções ao Agente Curador
+        "limit": 50, # Aumentado para 50 para dar mais opções ao Agente Curador
         "apiKey": API_KEY
     }
     

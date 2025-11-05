@@ -4,13 +4,28 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { ArrowLeft, Check, Link as LinkIcon, Plane, Hotel, MapPinned } from "lucide-react"; // Importa ícones
+import {
+  ArrowLeft,
+  Check,
+  Link as LinkIcon,
+  Plane,
+  Hotel,
+  MapPinned,
+} from "lucide-react";
 import { useState } from "react";
 import { useToast } from "@/hooks/use-toast";
-import { ApiActivity, ApiFlight, ApiHotel } from "@/services/api"; // Importa os novos tipos
+import { ApiActivity, ApiFlight, ApiHotel } from "@/services/api";
 
 // Componente helper para criar um item da lista
-const SummaryItem = ({ icon: Icon, title, url }: { icon: React.ElementType, title: string, url: string }) => (
+const SummaryItem = ({
+  icon: Icon,
+  title,
+  url,
+}: {
+  icon: React.ElementType;
+  title: string;
+  url: string;
+}) => (
   <div className="flex items-center justify-between">
     <div className="flex items-center gap-3">
       <Icon className="h-5 w-5 text-primary" />
@@ -25,49 +40,50 @@ const SummaryItem = ({ icon: Icon, title, url }: { icon: React.ElementType, titl
   </div>
 );
 
-const Booking = () => {
+// MUDANÇA: Componente renomeado para Summary
+const Summary = () => {
   const location = useLocation();
   const navigate = useNavigate();
   const { toast } = useToast();
-  
-  // Obtém os dados completos dos itens, não apenas os IDs
-  const { 
-    destination, 
-    checkIn, 
-    checkOut, 
-    flightDetails, 
-    hotelDetails, 
-    activityDetails 
+
+  const {
+    destination,
+    checkIn,
+    checkOut,
+    flightDetails,
+    hotelDetails,
+    activityDetails,
   } = (location.state || {}) as {
     destination: string;
     checkIn: string;
     checkOut: string;
-    flightDetails: ApiFlight;
-    hotelDetails: ApiHotel;
-    activityDetails: ApiActivity[];
+    flightDetails: ApiFlight; // Agora espera o objeto completo
+    hotelDetails: ApiHotel; // Agora espera o objeto completo
+    activityDetails: ApiActivity[]; // Agora espera os objetos completos
   };
 
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
 
-  if (!destination || !flightDetails || !hotelDetails) {
+  // MUDANÇA: Melhor verificação. Se não houver *nada* para salvar, volta.
+  if (!destination && !flightDetails && !hotelDetails && !activityDetails) {
     navigate("/");
     return null;
   }
 
-  const handleConfirmBooking = () => {
+  const handleConfirmSummary = () => {
     if (!name || !email) {
       toast({
         title: "Campos obrigatórios",
-        description: "Por favor, preencha seu nome e email.",
+        description: "Por favor, preencha seu nome e email para salvar.",
         variant: "destructive",
       });
       return;
     }
 
     setIsProcessing(true);
-    // Simula o envio do resumo da pesquisa (ex: para o email do usuário)
+    // Simula o envio do resumo da pesquisa
     setTimeout(() => {
       toast({
         title: "Pesquisa Salva!",
@@ -78,20 +94,30 @@ const Booking = () => {
     }, 1500);
   };
 
-  // Removemos toda a lógica de preço falso
-  
   return (
-    <div className="min-h-screen bg-background">
+    <div
+      className="min-h-screen bg-cover bg-center bg-fixed"
+      style={{
+        backgroundImage:
+          "linear-gradient(to bottom, hsl(var(--background) / 0.9), hsl(var(--background) / 1)), url(/src/assets/hero-beach.jpg)",
+        backgroundSize: "cover",
+        backgroundPosition: "center",
+      }}
+    >
       <div className="container mx-auto px-4 py-8">
         {/* Header */}
         <div className="flex items-center gap-4 mb-8">
-          <Button variant="ghost" onClick={() => navigate(-1)}>
+          <Button variant="outline" onClick={() => navigate(-1)}>
             <ArrowLeft className="h-5 w-5 mr-2" />
             Voltar
           </Button>
           <div>
-            <h1 className="text-3xl font-bold text-foreground">Resumo da Pesquisa</h1>
-            <p className="text-muted-foreground">Revise os links selecionados para {destination}</p>
+            <h1 className="text-3xl font-bold text-foreground">
+              Resumo da Pesquisa
+            </h1>
+            <p className="text-muted-foreground">
+              Salve os links de interesse para sua viagem
+            </p>
           </div>
         </div>
 
@@ -100,11 +126,14 @@ const Booking = () => {
           <div className="lg:col-span-2 space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-foreground">Salvar sua Pesquisa</CardTitle>
+                <CardTitle className="text-foreground">
+                  Salvar suas Recomendações
+                </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <p className="text-sm text-muted-foreground">
-                  Preencha seus dados para salvar este resumo. (Isso é uma simulação)
+                  Preencha seus dados para salvar este resumo. (Isso é uma
+                  simulação)
                 </p>
                 <div>
                   <Label htmlFor="name">Nome Completo</Label>
@@ -127,61 +156,62 @@ const Booking = () => {
                 </div>
               </CardContent>
             </Card>
-
-            {/* Removemos o Card de Pagamento */}
           </div>
 
           {/* Resumo dos Itens Selecionados */}
           <div className="lg:col-span-1">
             <Card className="sticky top-8">
               <CardHeader>
-                <CardTitle className="text-foreground">Itens Selecionados</CardTitle>
+                <CardTitle className="text-foreground">Itens Salvos</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div>
-                  <p className="text-sm font-semibold text-foreground mb-2">Destino</p>
+                  <p className="text-sm font-semibold text-foreground mb-2">
+                    Destino
+                  </p>
                   <p className="text-muted-foreground">{destination}</p>
-                  <p className="text-sm text-muted-foreground">{checkIn} - {checkOut}</p>
+                  <p className="text-sm text-muted-foreground">
+                    {checkIn} - {checkOut}
+                  </p>
                 </div>
 
                 <Separator />
 
                 <div className="space-y-3">
                   {/* Item de Voo */}
-                  <SummaryItem 
-                    icon={Plane}
-                    title={flightDetails.airline} // Mostra a fonte
-                    url={flightDetails.id} // Link
-                  />
-                  
+                  {flightDetails && (
+                    <SummaryItem
+                      icon={Plane}
+                      title={flightDetails.airline}
+                      url={flightDetails.id}
+                    />
+                  )}
+
                   {/* Item de Hotel */}
-                  <SummaryItem 
-                    icon={Hotel}
-                    title={hotelDetails.name} // Mostra o título
-                    url={hotelDetails.id} // Link
-                  />
+                  {hotelDetails && (
+                    <SummaryItem
+                      icon={Hotel}
+                      title={hotelDetails.name}
+                      url={hotelDetails.id}
+                    />
+                  )}
 
                   {/* Itens de Atividade */}
-                  {activityDetails?.length > 0 && (
-                    <>
-                      {activityDetails.map(activity => (
-                        <SummaryItem 
-                          key={activity.id}
-                          icon={MapPinned}
-                          title={activity.title} // Mostra o título
-                          url={activity.id} // Link
-                        />
-                      ))}
-                    </>
-                  )}
+                  {activityDetails?.length > 0 &&
+                    activityDetails.map((activity) => (
+                      <SummaryItem
+                        key={activity.id}
+                        icon={MapPinned}
+                        title={activity.title}
+                        url={activity.id}
+                      />
+                    ))}
                 </div>
 
                 <Separator />
 
-                {/* Removemos o cálculo de Total */}
-
-                <Button 
-                  onClick={handleConfirmBooking}
+                <Button
+                  onClick={handleConfirmSummary}
                   disabled={isProcessing}
                   className="w-full bg-secondary hover:bg-secondary/90 text-secondary-foreground"
                   size="lg"
@@ -204,4 +234,4 @@ const Booking = () => {
   );
 };
 
-export default Booking;
+export default Summary;

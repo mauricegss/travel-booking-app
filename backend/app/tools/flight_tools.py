@@ -55,6 +55,11 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
     """Busca por horários de voos na API AviationStack com base na origem e destino."""
     print(f"Tool: Buscando voos REAIS (AviationStack) de {origin} para {destination}...")
     
+    # --- [INÍCIO DA MUDANÇA] ---
+    # Pega o return_date dos argumentos extras
+    return_date = kwargs.get('return_date')
+    # --- [FIM DA MUDANÇA] ---
+
     try:
         API_KEY = os.environ["AVIATIONSTACK_API_KEY"]
     except KeyError:
@@ -75,7 +80,7 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
         "dep_iata": origin_iata,
         "arr_iata": dest_iata,
         "flight_status": "scheduled",
-        "limit": 5
+        "limit": 5 # A API gratuita é muito limitada, 5 é um bom número
     }
 
     try:
@@ -91,30 +96,38 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
             airline_name = flight.get('airline', {}).get('name', 'N/A')
             flight_number = flight.get('flight', {}).get('number', '')
             
-            # --- INÍCIO DA MELHORIA ---
+            # --- [INÍCIO DA MUDANÇA] ---
             # 1. Cria um link de busca de preço muito melhor
-            #    (O frontend espera um ID que seja um link clicável)
-            google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin.replace(' ', '+')}+para+{destination.replace(' ', '+')}+em+{departure_date}"
+            origin_query = origin.replace(' ', '+')
+            dest_query = destination.replace(' ', '+')
+            
+            if return_date:
+                # Se temos data de volta, o link é de ida E volta
+                google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin_query}+para+{dest_query}+de+{departure_date}+a+{return_date}"
+                duration_text = f"Link de busca: {origin_iata} ➔ {dest_iata} (Ida e Volta)"
+            else:
+                # Se não, o link é só de ida
+                google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin_query}+para+{dest_query}+em+{departure_date}"
+                duration_text = f"Link de busca: {origin_iata} ➔ {dest_iata} (S_oacute; Ida)"
             
             # 2. Informa o utilizador sobre o plano gratuito
-            price_text = "Preço N/A (Plano Grátis)"
-            
-            # 3. Dá uma 'duração' mais informativa
-            duration_text = f"Rota: {origin_iata} ➔ {dest_iata} (Voo {flight_number})"
-            # --- FIM DA MELHORIA ---
+            price_text = "Verificar no site"
+            # --- [FIM DA MUDANÇA] ---
 
             formatted_results.append({
-                "id": google_flights_url, # <-- Melhoria 1
+                "id": google_flights_url, # <-- Mudança 1
                 "airline": airline_name,
                 "departure": "N/A",
                 "arrival": "N/A",
-                "duration": duration_text, # <-- Melhoria 3
-                "price": price_text, # <-- Melhoria 2
+                "duration": duration_text, # <-- Mudança 2
+                "price": price_text, 
                 "stops": 0
             })
         
         print(f"Retornando {len(formatted_results)} opções de voo da AviationStack.")
-        return formatted_results
+        # Retorna apenas a *primeira* opção (o link de busca), 
+        # já que todos os links gerados serão iguais
+        return [formatted_results[0]] if formatted_results else []
 
     except requests.exceptions.HTTPError as e:
         print(f"Erro na API AviationStack (Voos): {e.response.text}")
