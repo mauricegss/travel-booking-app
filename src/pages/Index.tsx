@@ -22,8 +22,8 @@ const Index = () => {
     },
     {
       icon: Sparkles,
-      title: "Integração e Reserva",
-      description: "Combina informações e oferece interface simplificada para confirmação." 
+      title: "Integração e Relatório",
+      description: "Combina informações e oferece interface simplificada para visualização." 
     }
   ];
 
