@@ -4,7 +4,7 @@ import {
   AlertCircle,
   ArrowLeft,
   Loader2,
-  Download, // <-- MUDANÇA: Ícone de Download
+  Download,
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { TripDataResponse } from "@/services/api";
@@ -16,6 +16,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import ReactMarkdown from "react-markdown";
+import heroImage from "@/assets/hero-beach.jpg";
 
 const SearchResults = () => {
   const [searchParams] = useSearchParams();
@@ -28,8 +29,6 @@ const SearchResults = () => {
   const [apiResponse, setApiResponse] = useState<TripDataResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // REMOVEMOS os estados de seleção (selectedFlight, selectedHotel, etc.)
-
   useEffect(() => {
     if (location.state?.apiResponse) {
       setApiResponse(location.state.apiResponse);
@@ -37,31 +36,18 @@ const SearchResults = () => {
     setIsLoading(false);
   }, [location.state]);
 
-  // REMOVEMOS as funções handleSelect (handleSelectFlight, etc.)
-
-  // MUDANÇA: Esta função agora baixa o relatório
   const handleDownloadReport = () => {
     if (!apiResponse?.itinerary) {
       alert("Não há relatório para baixar.");
       return;
     }
-
-    // Cria um "Blob" (Binary Large Object) com o texto do relatório
     const blob = new Blob([apiResponse.itinerary], { type: "text/markdown" });
-
-    // Cria um link <a> em memória
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    
-    // Define o nome do arquivo que será baixado
     const fileName = `Relatorio-Viagem-${apiResponse.destination || 'Destino'}.md`;
     link.download = fileName;
-
-    // Simula o clique no link para iniciar o download
     document.body.appendChild(link);
     link.click();
-
-    // Remove o link da memória
     document.body.removeChild(link);
     URL.revokeObjectURL(link.href);
   };
@@ -76,86 +62,96 @@ const SearchResults = () => {
     );
   }
 
-  // Se houver erro ou resposta vazia, mostra o erro
-  if (
-    !apiResponse ||
-    (apiResponse.error && (!apiResponse.flights || apiResponse.flights.length === 0))
-  ) {
-    return (
-      <div className="container mx-auto px-4 py-8 text-center">
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertTitle>Erro no Planejamento</AlertTitle>
-          <AlertDescription>
-            {apiResponse?.itinerary ||
-              apiResponse?.error ||
-              "Não foi possível carregar os resultados. Por favor, tente novamente."}
-          </AlertDescription>
-        </Alert>
-        <Button variant="outline" onClick={() => navigate("/")} className="mt-4">
-          <ArrowLeft className="h-5 w-5 mr-2" />
-          Voltar
-        </Button>
-      </div>
-    );
-  }
-
-  // Estilo de fundo similar ao Index
   return (
     <div
-      className="min-h-screen bg-cover bg-center bg-fixed"
-      style={{
-        backgroundImage:
-          "linear-gradient(to bottom, hsl(var(--background) / 0.9), hsl(var(--background) / 1)), url(/src/assets/hero-beach.jpg)",
-        backgroundSize: "cover",
-        backgroundPosition: "center",
-      }}
+      className="min-h-screen bg-cover bg-center bg-fixed flex flex-col items-center p-4 relative"
+      style={{ backgroundImage: `url(${heroImage})` }}
     >
-      <div className="container mx-auto px-4 py-8">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
-          <div className="flex items-center gap-4">
-            <Button
-              variant="outline"
-              size="icon"
-              className="hidden sm:inline-flex"
-              onClick={() => navigate(-1)}
-            >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div>
-              <h1 className="text-3xl font-bold text-foreground">
-                Recomendações para {apiResponse.destination ?? destination}
-              </h1>
-              <p className="text-muted-foreground">
-                {apiResponse.start_date ?? checkIn} até{" "}
-                {apiResponse.end_date ?? checkOut}
-              </p>
-            </div>
-          </div>
-          <Button
-            onClick={handleDownloadReport} // <-- MUDANÇA
-            size="lg"
-            className="bg-secondary hover:bg-secondary/90 text-secondary-foreground w-full sm:w-auto"
-            // O botão está sempre ativo se o relatório existe
-          >
-            <Download className="h-5 w-5 mr-2" />
-            Salvar Relatório (.md)
-          </Button>
-        </div>
+      {/* Overlay idêntico ao Index */}
+      <div className="absolute inset-0 bg-black/50 z-0"></div>
 
-        {/* Relatório da IA é a única coisa na página */}
-        <Card className="bg-card/80 backdrop-blur-sm">
-          <CardHeader>
-            <CardTitle>Resumo do seu Agente de IA</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="prose prose-sm dark:prose-invert max-w-none text-left text-card-foreground">
-              <ReactMarkdown>{apiResponse.itinerary}</ReactMarkdown>
+      {/* Container principal */}
+      <div className="relative z-10 container mx-auto flex flex-col items-center gap-8 w-full max-w-6xl py-8 md:py-16">
+        
+        {(!apiResponse ||
+          (apiResponse.error && (!apiResponse.flights || apiResponse.flights.length === 0))
+        ) ? (
+          <Card className="w-full max-w-2xl bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border-destructive">
+            <CardHeader>
+              <AlertTitle className="text-destructive-foreground text-lg font-bold flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Erro no Planejamento
+              </AlertTitle>
+            </CardHeader>
+            <CardContent>
+              <AlertDescription className="text-white/90">
+                {apiResponse?.itinerary ||
+                  apiResponse?.error ||
+                  "Não foi possível carregar os resultados. Por favor, tente novamente."}
+              </AlertDescription>
+              {/* --- [INÍCIO DA MUDANÇA] --- */}
+              {/* Botão "Voltar" (erro) com estilo "vidro fosco" */}
+              <Button
+                onClick={() => navigate("/")} 
+                className="mt-6 bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30 transition-colors"
+              >
+              {/* --- [FIM DA MUDANÇA] --- */}
+                <ArrowLeft className="h-5 w-5 mr-2" />
+                Voltar para a Busca
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          
+          <>
+            <div className="w-full flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
+              <div className="flex items-center gap-4">
+                {/* --- [INÍCIO DA MUDANÇA] --- */}
+                {/* Botão "Voltar" (ícone) com estilo "vidro fosco" */}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="hidden sm:inline-flex bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30 transition-colors"
+                  onClick={() => navigate(-1)}
+                >
+                {/* --- [FIM DA MUDANÇA] --- */}
+                  <ArrowLeft className="h-5 w-5" />
+                </Button>
+                <div>
+                  <h1 className="text-3xl font-bold text-white drop-shadow-lg">
+                    Recomendações para {apiResponse.destination ?? destination}
+                  </h1>
+                  <p className="text-white/90 drop-shadow-md">
+                    {apiResponse.start_date ?? checkIn} até{" "}
+                    {apiResponse.end_date ?? checkOut}
+                  </p>
+                </div>
+              </div>
+              
+              <Button
+                onClick={handleDownloadReport}
+                size="lg"
+                className="w-full sm:w-auto bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30 transition-colors"
+              >
+                <Download className="h-5 w-5 mr-2" />
+                Salvar Relatório
+              </Button>
             </div>
-          </CardContent>
-        </Card>
 
-        {/* REMOVEMOS toda a seção de <Tabs> e Cards */}
+            <Card className="w-full bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20">
+              <CardHeader>
+                <CardTitle className="text-white text-2xl">
+                  Resumo do seu Agente de IA
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="prose prose-sm prose-invert max-w-none text-left">
+                  <ReactMarkdown>{apiResponse.itinerary}</ReactMarkdown>
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
     </div>
   );

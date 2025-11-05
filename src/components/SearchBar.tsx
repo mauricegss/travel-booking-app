@@ -1,4 +1,4 @@
-import { Search, Calendar, MapPin, Loader2, PlaneTakeoff } from "lucide-react"; // Adiciona PlaneTakeoff
+import { Search, Calendar, MapPin, Loader2, PlaneTakeoff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
@@ -9,8 +9,8 @@ import { useToast } from "@/hooks/use-toast";
 export const SearchBar = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
-  const [origin, setOrigin] = useState("Rio de Janeiro"); // Define um valor para testes
-  const [destination, setDestination] = useState("Curitiba"); // Define um valor para testes
+  const [origin, setOrigin] = useState("");
+  const [destination, setDestination] = useState("");
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -35,19 +35,14 @@ export const SearchBar = () => {
         return;
     }
 
-
     setIsLoading(true);
-    // Cria a string de requisição para o backend
     const userRequest = `Planeje uma viagem saindo de ${origin} para ${destination} de ${checkIn} até ${checkOut}.`;
 
     try {
-      // Chama a API
       const apiResponse = await planTrip(userRequest);
-      // Navega para a página de resultados passando os dados via state
       navigate(
-        // Passa os parâmetros originais na URL para exibição
         `/search-results?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&checkin=${checkIn}&checkout=${checkOut}`,
-        { state: { apiResponse } } // Passa a resposta completa da API
+        { state: { apiResponse } }
       );
     } catch (error) {
       console.error("Erro ao buscar planejamento:", error);
@@ -62,13 +57,11 @@ export const SearchBar = () => {
   };
 
   return (
-    // Estilos do container principal
-    <div className="w-full max-w-5xl mx-auto bg-white/10 backdrop-blur-sm rounded-2xl shadow-2xl p-6">
-      {/* Grid para os inputs e botão */}
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4"> {/* Ajustado para 5 colunas */}
+    <div className="w-full max-w-5xl mx-auto bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 p-6">
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
 
         {/* Input Origem */}
-        <div className="relative md:col-span-1"> {/* Define a coluna */}
+        <div className="relative md:col-span-1">
           <PlaneTakeoff className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             placeholder="Origem"
@@ -80,7 +73,7 @@ export const SearchBar = () => {
         </div>
 
         {/* Input Destino */}
-        <div className="relative md:col-span-1"> {/* Define a coluna */}
+        <div className="relative md:col-span-1">
           <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             placeholder="Destino"
@@ -92,46 +85,46 @@ export const SearchBar = () => {
         </div>
 
         {/* Input Check-in */}
-        <div className="relative md:col-span-1"> {/* Define a coluna */}
+        <div className="relative md:col-span-1">
           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="date"
             value={checkIn}
             onChange={(e) => setCheckIn(e.target.value)}
-            placeholder="Check-in" // Placeholder pode não aparecer em inputs date
+            placeholder="Check-in"
             className="pl-10 h-12 bg-background border-border text-foreground placeholder:text-muted-foreground"
-            style={{ colorScheme: "light" }} // Força o date picker claro
+            style={{ colorScheme: "light" }}
             disabled={isLoading}
           />
         </div>
 
         {/* Input Check-out */}
-        <div className="relative md:col-span-1"> {/* Define a coluna */}
+        <div className="relative md:col-span-1">
           <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
           <Input
             type="date"
             value={checkOut}
             onChange={(e) => setCheckOut(e.target.value)}
-            placeholder="Check-out" // Placeholder pode não aparecer em inputs date
+            placeholder="Check-out"
             className="pl-10 h-12 bg-background border-border text-foreground placeholder:text-muted-foreground"
-            style={{ colorScheme: "light" }} // Força o date picker claro
+            style={{ colorScheme: "light" }}
             disabled={isLoading}
           />
         </div>
 
-        {/* Botão Buscar */}
+        {/* --- [INÍCIO DA MUDANÇA] --- */}
+        {/* Botão Buscar com estilo "vidro fosco" completo */}
         <Button
           onClick={handleSearch}
-          className="h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium md:col-span-1" // Define a coluna
+          className="h-12 font-medium md:col-span-1 bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30 transition-colors"
           disabled={isLoading}
         >
-          {/* Ícone condicional de carregamento ou busca */}
+        {/* --- [FIM DA MUDANÇA] --- */}
           {isLoading ? (
             <Loader2 className="mr-2 h-5 w-5 animate-spin" />
           ) : (
             <Search className="mr-2 h-5 w-5" />
           )}
-          {/* Texto condicional do botão */}
           {isLoading ? "Buscando..." : "Buscar"}
         </Button>
       </div>

@@ -1,7 +1,7 @@
 import { Plane, Hotel, MapPinned, Sparkles } from "lucide-react";
 import { SearchBar } from "@/components/SearchBar";
 import { AgentCard } from "@/components/AgentCard";
-import heroImage from "@/assets/hero-beach.jpg"; // Mantenha a importação da imagem
+import heroImage from "@/assets/hero-beach.jpg";
 
 const Index = () => {
   const agents = [
@@ -22,32 +22,30 @@ const Index = () => {
     },
     {
       icon: Sparkles,
-      title: "Integração e Relatório",
-      description: "Combina informações e oferece interface simplificada para visualização." 
+      title: "Integração e Reserva",
+      description: "Combina informações e oferece interface simplificada para confirmação." 
     }
   ];
 
   return (
-    // Aplica a imagem de fundo aqui, fixa e cobrindo toda a área
     <div 
       className="min-h-screen bg-cover bg-center bg-fixed flex flex-col justify-center items-center p-4 relative" 
       style={{ backgroundImage: `url(${heroImage})` }}
     >
-      {/* Overlay semitransparente para melhorar a legibilidade */}
+      {/* Overlay semitransparente */}
       <div className="absolute inset-0 bg-black/50 z-0"></div>
 
-      {/* Container principal para o conteúdo, com z-index para ficar sobre o overlay */}
+      {/* Container principal */}
       <div className="relative z-10 container mx-auto flex flex-col items-center gap-8 md:gap-12 w-full"> 
         
-        {/* Conteúdo da Hero Section (Título, Descrição, SearchBar) */}
-        <div className="text-center text-white pt-16 md:pt-24"> {/* Adiciona padding no topo */}
+        {/* Conteúdo da Hero Section */}
+        <div className="text-center text-white pt-16 md:pt-24">
           <h1 className="text-4xl md:text-6xl font-bold mb-4 drop-shadow-2xl">
             Planeje sua viagem dos sonhos
           </h1>
           <p className="text-lg md:text-xl text-white/95 mb-8 max-w-3xl mx-auto drop-shadow-lg">
             Agentes de IA trabalham para encontrar as melhores opções personalizadas para você
           </p>
-          {/* SearchBar movida para dentro deste container */}
           <SearchBar /> 
         </div>
 
@@ -64,7 +62,13 @@ const Index = () => {
           
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"> 
             {agents.map((agent, index) => (
-              <div key={index} className="bg-white/10 backdrop-blur-sm rounded-lg"> 
+              // --- [INÍCIO DA MUDANÇA] ---
+              // Aplicando o estilo de "vidro fosco" completo aqui
+              <div 
+                key={index} 
+                className="bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20"
+              > 
+              {/* --- [FIM DA MUDANÇA] --- */}
                 <AgentCard {...agent} />
               </div>
             ))}
@@ -72,7 +76,6 @@ const Index = () => {
         </section>
 
       </div>
-      {/* Footer Removido */}
     </div>
   );
 };
