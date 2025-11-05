@@ -7,7 +7,7 @@ from pydantic.v1 import BaseModel, Field
 from functools import lru_cache
 from tavily import TavilyClient
 
-# --- Helper de Localização (só para voos) ---
+# --- Helper de Localização (Corrigido para pedir JSON) ---
 @lru_cache(maxsize=100)
 def _get_iata_code(city_name: str) -> str | None:
     try:
@@ -17,21 +17,35 @@ def _get_iata_code(city_name: str) -> str | None:
         return None
     
     print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
-    query = f"Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}? Responda APENAS o código de 3 letras (ex: 'GRU')."
+    
+    # --- INÍCIO DA CORREÇÃO ---
+    # Pedir JSON é mais robusto do que pedir "APENAS 3 LETRAS"
+    query = f"""
+    Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}?
+    Responda APENAS com um objeto JSON no formato: {{"iataCode": "XXX"}}
+    """
+    # --- FIM DA CORREÇÃO ---
     
     try:
         response = tavily_client.search(query=query, search_depth="basic", include_answer=True)
         answer = response.get('answer')
         
-        if answer and len(answer) >= 3:
-            iata = answer.strip().split(" ")[0][:3] # Pega os 3 primeiros caracteres
-            print(f"Tavily (IATA) Answer: {iata}")
-            return iata
+        if answer:
+            print(f"Tavily (IATA) Answer: {answer}")
+            
+            # Limpa a resposta da Tavily
+            json_str = answer.strip().replace("```json", "").replace("```", "").strip()
+            data = json.loads(json_str)
+
+            if data.get('iataCode'):
+                iata = data['iataCode']
+                print(f"IATA Code extraído: {iata}")
+                return iata
         
-        print(f"Tavily não retornou 'answer' para o IATA de {city_name}.")
+        print(f"Tavily não retornou 'answer' ou JSON válido para o IATA de {city_name}.")
         return None
     except Exception as e:
-        print(f"Erro ao buscar IATA com Tavily: {e}")
+        print(f"Erro ao buscar/processar IATA com Tavily: {e}")
         return None
 # --- Fim do Helper ---
 
@@ -66,7 +80,7 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
         "access_key": API_KEY,
         "dep_iata": origin_iata,
         "arr_iata": dest_iata,
-        "flight_status": "scheduled", # Busca voos agendados
+        "flight_status": "scheduled", 
         "limit": 5
     }
 
@@ -83,7 +97,6 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
             airline_name = flight.get('airline', {}).get('name', 'N/A')
             flight_number = flight.get('flight', {}).get('number', '')
             
-            # Gera um link de fallback para o Google Flights
             fallback_url = f"https://www.google.com/flights?q=Voo+{origin_iata}+para+{dest_iata}"
             
             formatted_results.append({
@@ -91,9 +104,9 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
                 "airline": airline_name,
                 "departure": "N/A",
                 "arrival": "N/A",
-                "duration": f"Voo {airline_name} {flight_number}", # O plano grátis não dá duração
-                "price": "Verificar Preço", # O plano grátis não dá preço
-                "stops": 0 # O plano grátis foca em voos individuais
+                "duration": f"Voo {airline_name} {flight_number}",
+                "price": "Verificar Preço",
+                "stops": 0
             })
         
         print(f"Retornando {len(formatted_results)} opções de voo da AviationStack.")
