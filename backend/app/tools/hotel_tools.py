@@ -1,124 +1,94 @@
 from typing import List, Dict, Optional
 import os
 import requests
-import json
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from functools import lru_cache
-from tavily import TavilyClient
 
-# --- Helper de Localização (JSON) ---
-@lru_cache(maxsize=100)
-def _get_iata_code(city_name: str) -> str | None:
-    try:
-        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-    except KeyError:
-        print("ERRO (Voos): TAVILY_API_KEY não configurada.")
-        return None
-    
-    print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
-    query = f"""
-    Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}?
-    Responda APENAS com um objeto JSON no formato: {{"iataCode": "XXX"}}
-    """
-    
-    try:
-        response = tavily_client.search(query=query, search_depth="basic", include_answer=True)
-        answer = response.get('answer')
-        
-        if answer:
-            print(f"Tavily (IATA) Answer: {answer}")
-            json_str = answer.strip().replace("```json", "").replace("```", "").strip()
-            data = json.loads(json_str)
+# --- Esquema de Input para Hotéis ---
+class HotelSearchInput(BaseModel):
+    destination: str = Field(description="Cidade de destino para a busca de hotéis.")
+    check_in_date: str = Field(description="Data de check-in no formato AAAA-MM-DD.")
+    check_out_date: str = Field(description="Data de check-out no formato AAAA-MM-DD.")
 
-            if data.get('iataCode'):
-                iata = data['iataCode']
-                print(f"IATA Code extraído: {iata}")
-                return iata
-        
-        print(f"Tavily não retornou 'answer' ou JSON válido para o IATA de {city_name}.")
+# Helper para obter coordenadas da cidade usando Geoapify
+def _get_city_coordinates(city_name: str, api_key: str) -> Optional[Dict[str, float]]:
+    print(f"Tool (Hotel-Helper): Buscando coordenadas para {city_name} (Geoapify Geocoding)")
+    GEOCODE_URL = "https://api.geoapify.com/v1/geocode/search"
+    params = {
+        "text": city_name,
+        "apiKey": api_key,
+        "limit": 1
+    }
+    try:
+        response = requests.get(GEOCODE_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("features"):
+            coords = data["features"][0]["geometry"]["coordinates"]
+            # Geoapify retorna [lon, lat]
+            return {"lon": coords[0], "lat": coords[1]}
         return None
     except Exception as e:
-        print(f"Erro ao buscar/processar IATA com Tavily: {e}")
+        print(f"Erro ao buscar coordenadas no Geoapify: {e}")
         return None
-# --- Fim do Helper ---
 
-class FlightSearchInput(BaseModel):
-    origin: str = Field(description="Cidade ou aeroporto de origem.")
-    destination: str = Field(description="Cidade ou aeroporto de destino.")
-    departure_date: str = Field(description="Data de partida no formato AAAA-MM-DD.")
-    return_date: Optional[str] = Field(None, description="Data de retorno no formato AAAA-MM-DD (opcional).")
-    passengers: int = Field(default=1, description="Número de passageiros.")
-
-@tool(args_schema=FlightSearchInput)
-def search_flights(origin: str, destination: str, departure_date: str, **kwargs) -> List[Dict]:
-    """Busca por horários de voos na API AviationStack com base na origem e destino."""
-    print(f"Tool: Buscando voos REAIS (AviationStack) de {origin} para {destination}...")
+@tool(args_schema=HotelSearchInput)
+def search_hotels(destination: str, check_in_date: str, check_out_date: str) -> List[Dict]:
+    """Busca por hotéis na API Geoapify com base no destino e datas."""
+    print(f"Tool: Buscando hotéis REAIS (Geoapify) em {destination}...")
     
     try:
-        API_KEY = os.environ["AVIATIONSTACK_API_KEY"]
+        API_KEY = os.environ["GEOAPIFY_API_KEY"]
     except KeyError:
-        return [{"id": "error", "airline": "AVIATIONSTACK_API_KEY não configurada.", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        print("ERRO (Hotéis): GEOAPIFY_API_KEY não configurada.")
+        return [{"id": "error", "name": "GEOAPIFY_API_KEY não configurada.", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
 
-    origin_iata = _get_iata_code(origin)
-    dest_iata = _get_iata_code(destination)
-    
-    if not origin_iata:
-        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
-    if not dest_iata:
-        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+    # 1. Obter coordenadas da cidade
+    coords = _get_city_coordinates(destination, API_KEY)
+    if not coords:
+        return [{"id": "error", "name": f"Não foi possível encontrar coordenadas para {destination}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
 
-    API_URL = "http://api.aviationstack.com/v1/flights"
-    
+    # 2. Buscar locais (hotéis) perto dessas coordenadas
+    PLACES_URL = "https://api.geoapify.com/v2/places"
     params = {
-        "access_key": API_KEY,
-        "dep_iata": origin_iata,
-        "arr_iata": dest_iata,
-        "flight_status": "scheduled",
-        "limit": 5
+        "categories": "accommodation.hotel",
+        # --- MUDANÇA 1: Aumentamos o raio para 10km ---
+        "filter": f"circle:{coords['lon']},{coords['lat']},10000", # Raio de 10km
+        "bias": f"proximity:{coords['lon']},{coords['lat']}",
+        # --- MUDANÇA 2: Aumentamos o limite para 10 ---
+        "limit": 10, # Damos 10 opções para a IA filtrar
+        "apiKey": API_KEY
     }
-
+    
     try:
-        response = requests.get(API_URL, params=params)
+        response = requests.get(PLACES_URL, params=params)
         response.raise_for_status()
-        data = response.json().get("data", [])
+        data = response.json()
         
+        results = data.get('features', [])
         formatted_results = []
-        if not data:
+        if not results:
+            print("Geoapify não retornou resultados para hotéis.")
             return []
 
-        for flight in data:
-            airline_name = flight.get('airline', {}).get('name', 'N/A')
-            flight_number = flight.get('flight', {}).get('number', '')
+        # Mapeia os resultados do Geoapify para o formato ApiHotel
+        for res in results:
+            props = res.get('properties', {})
+            # Monta um link de busca do Google
+            google_search_url = f"https://www.google.com/search?q={props.get('name', 'hotel').replace(' ', '+')}+{destination.replace(' ', '+')}"
             
-            # --- INÍCIO DA MELHORIA ---
-            # 1. Cria um link de busca de preço muito melhor
-            #    (O frontend espera um ID que seja um link clicável)
-            google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin.replace(' ', '+')}+para+{destination.replace(' ', '+')}+em+{departure_date}"
-            
-            # 2. Informa o utilizador sobre o plano gratuito
-            price_text = "Preço N/A (Plano Grátis)"
-            
-            # 3. Dá uma 'duração' mais informativa
-            duration_text = f"Rota: {origin_iata} ➔ {dest_iata} (Voo {flight_number})"
-            # --- FIM DA MELHORIA ---
-
             formatted_results.append({
-                "id": google_flights_url, # <-- Melhoria 1
-                "airline": airline_name,
-                "departure": "N/A",
-                "arrival": "N/A",
-                "duration": duration_text, # <-- Melhoria 3
-                "price": price_text, # <-- Melhoria 2
-                "stops": 0
+                "id": props.get('datasource', {}).get('raw', {}).get('osm_id', google_search_url), # Usa o URL do Google como ID/link
+                "name": props.get('name', 'Hotel não identificado'),
+                "location": props.get('address_line2', destination), # Endereço ou cidade
+                "rating": 0, # Geoapify (plano gratuito) não fornece rating
+                "price": "Verificar no site",
+                "amenities": [props.get('address_line1', 'Endereço não disponível')] # Usamos amenities para a descrição
             })
         
-        print(f"Retornando {len(formatted_results)} opções de voo da AviationStack.")
+        print(f"Retornando {len(formatted_results)} opções de hotel da Geoapify.")
         return formatted_results
 
-    except requests.exceptions.HTTPError as e:
-        print(f"Erro na API AviationStack (Voos): {e.response.text}")
-        return [{"id": "error", "airline": f"Erro na API de voos: {e.response.text}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
     except Exception as e:
-        print(f"Erro inesperado (Voos): {e}")
-        return [{"id": "error", "airline": f"Erro ao buscar voos: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        print(f"Erro inesperado (Hotéis - Geoapify): {e}")
+        return [{"id": "error", "name": f"Erro ao buscar hotéis: {e}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]

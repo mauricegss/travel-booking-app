@@ -1,84 +1,107 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 import os
 import requests
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from unidecode import unidecode # <-- A IMPORTAÇÃO NECESSÁRIA
+
+# --- Helper de Coordenadas (Copiado do hotel_tools) ---
+def _get_city_coordinates(city_name: str, api_key: str) -> Optional[Dict[str, float]]:
+    print(f"Tool (Activity-Helper): Buscando coordenadas para {city_name} (Geoapify Geocoding)")
+    GEOCODE_URL = "https://api.geoapify.com/v1/geocode/search"
+    params = {
+        "text": city_name,
+        "apiKey": api_key,
+        "limit": 1
+    }
+    try:
+        response = requests.get(GEOCODE_URL, params=params)
+        response.raise_for_status()
+        data = response.json()
+        if data.get("features"):
+            coords = data["features"][0]["geometry"]["coordinates"]
+            # Geoapify retorna [lon, lat]
+            return {"lon": coords[0], "lat": coords[1]}
+        return None
+    except Exception as e:
+        print(f"Erro ao buscar coordenadas no Geoapify: {e}")
+        return None
+# --- Fim do Helper ---
 
 class ActivitySearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino para atividades.")
-    start_date: str = Field(description="Data de início das atividades no formato AAAA-MM-DD.")
-    end_date: str = Field(description="Data de fim das atividades no formato AAAA-MM-DD.")
-
-# Helper para formatar data (Ticketmaster exige formato ISO 8601)
-def format_datetime_iso(date_str: str) -> str:
-    return f"{date_str}T00:00:00Z"
+    start_date: str = Field(description="Data de início (usada para contexto, não para filtro de API).")
+    end_date: str = Field(description="Data de fim (usada para contexto, não para filtro de API).")
 
 @tool(args_schema=ActivitySearchInput)
-def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
-    """Busca por atividades e eventos na API Ticketmaster com base no destino e datas."""
-    print(f"Tool: Buscando atividades REAIS (Ticketmaster) em {destination}...")
+def search_activities(destination: str, **kwargs) -> List[Dict]:
+    """Busca por atrações turísticas na API Geoapify com base no destino."""
+    print(f"Tool: Buscando atividades REAIS (Geoapify) em {destination}...")
     
     try:
-        TICKETMASTER_API_KEY = os.environ["TICKETMASTER_API_KEY"]
+        API_KEY = os.environ["GEOAPIFY_API_KEY"]
     except KeyError:
-        return [{"id": "error", "title": "TICKETMASTER_API_KEY não configurada no .env", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        print("ERRO (Atividades): GEOAPIFY_API_KEY não configurada.")
+        return [{"id": "error", "title": "GEOAPIFY_API_KEY não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
 
-    API_URL = "https://app.ticketmaster.com/discovery/v2/events.json"
-    
-    # Limpa o nome da cidade (ex: "São Paulo" -> "Sao Paulo")
-    city_normalized = unidecode(destination)
-    
+    # 1. Obter coordenadas da cidade
+    coords = _get_city_coordinates(destination, API_KEY)
+    if not coords:
+        return [{"id": "error", "title": f"Não foi possível encontrar coordenadas para {destination}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+
+    # 2. Buscar locais (atrações) perto dessas coordenadas
+    PLACES_URL = "https://api.geoapify.com/v2/places"
     params = {
-        "apikey": TICKETMASTER_API_KEY,
-        "city": city_normalized,
-        "startDateTime": format_datetime_iso(start_date),
-        "endDateTime": format_datetime_iso(end_date),
-        "size": 5, # Limita a 5 resultados
-        "sort": "date,asc",
-        "segmentName": "Music,Sports,Arts & Theater" # Foca em eventos
+        # --- MUDANÇA PRINCIPAL AQUI ---
+        # Lista de categorias VÁLIDAS da API Geoapify para turismo
+        "categories": "tourism.attraction,leisure.park,entertainment.museum,entertainment.zoo,commercial.shopping_mall,catering.restaurant", 
+        "filter": f"circle:{coords['lon']},{coords['lat']},15000", # Raio de 15km
+        "bias": f"proximity:{coords['lon']},{coords['lat']}",
+        "limit": 10, # Aumentado para 10 para dar mais opções ao Agente Curador
+        "apiKey": API_KEY
     }
-
+    
     try:
-        response = requests.get(API_URL, params=params)
-        response.raise_for_status()
+        response = requests.get(PLACES_URL, params=params)
+        response.raise_for_status() # Isso vai disparar o erro se a URL falhar
         
-        data = response.json().get("_embedded", {}).get("events", [])
+        data = response.json()
         
+        results = data.get('features', [])
         formatted_results = []
-        if not data:
+        if not results:
+            print("Geoapify não retornou resultados para atividades.")
             return []
 
-        for event in data:
-            # Preço (pode não existir)
-            price_range = event.get("priceRanges", [])
-            price = "Verificar no site"
-            if price_range:
-                price = f"A partir de {price_range[0].get('min', '?')} {price_range[0].get('currency', '')}"
+        # Mapeia os resultados do Geoapify para o formato ApiActivity
+        for res in results:
+            props = res.get('properties', {})
             
-            # Descrição (pode não existir)
-            description = event.get('info', event.get('description', 'Sem descrição...'))
+            # Monta um link de busca do Google
+            google_search_url = f"https://www.google.com/search?q={props.get('name', 'atividade').replace(' ', '+')}+{destination.replace(' ', '+')}"
             
-            # Local (Venue)
-            venue = "Local não informado"
-            if event.get("_embedded", {}).get("venues", []):
-                venue = event["_embedded"]["venues"][0].get("name", venue)
+            # Tenta pegar uma descrição, se não houver, usa o endereço
+            description = props.get('address_line2', 'Atração local')
+            
+            # Pega a categoria principal para usar como "Fonte"
+            category = props.get('categories', ['tourism'])[0].split('.')[0] # ex: "tourism" ou "leisure"
 
             formatted_results.append({
-                "id": event.get('url', '#'), # Link real do Ticketmaster
-                "title": event['name'],
+                "id": google_search_url, # Usa o URL do Google como ID/link
+                "title": props.get('name', 'Atração não identificada'),
                 "description": description,
-                "duration": "N/A (Evento)",
-                "price": price,
-                "capacity": f"Local: {venue}" # O frontend usa 'capacity' como "Fonte:"
+                "duration": "N/A", # Atrações não têm duração fixa
+                "price": "Verificar no site",
+                "capacity": category.capitalize() # Fonte (ex: "Tourism", "Leisure")
             })
         
-        print(f"Retornando {len(formatted_results)} opções de atividade da Ticketmaster.")
+        print(f"Retornando {len(formatted_results)} opções de atividade da Geoapify.")
         return formatted_results
 
     except requests.exceptions.HTTPError as e:
-        print(f"Erro na API Ticketmaster: {e.response.text}")
+        # Erro HTTP (como o 400 Bad Request)
+        print(f"!!! Erro na API Geoapify (Atividades): {e.response.text}")
         return [{"id": "error", "title": f"Erro na API de atividades: {e.response.text}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
     except Exception as e:
-        print(f"Erro inesperado (Atividades): {e}")
+        # Outros erros (ex: timeout, parsing de JSON)
+        print(f"!!! Erro inesperado (Atividades - Geoapify): {e}")
         return [{"id": "error", "title": f"Erro ao buscar atividades: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]

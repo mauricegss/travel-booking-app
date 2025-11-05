@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
+import json # <-- IMPORTAR JSON
 
 # --- CARREGUE O .ENV PRIMEIRO DE TUDO ---
-# Isso garante que 'os.environ' tenha as chaves ANTES do amadeus_client ser importado
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(dotenv_path=dotenv_path)
 print(f".env carregado de {dotenv_path}")
@@ -42,7 +42,7 @@ except Exception as e:
     print(f"Erro ao inicializar o ChatGoogleGenerativeAI: {e}")
     exit()
 
-# --- Modelos Pydantic V2 ---
+# --- Modelos Pydantic V2 (Sem alterações) ---
 class FlightDetails(BaseModel):
     id: str = PydanticV2Field(description="Identificador único do voo")
     airline: str = PydanticV2Field(description="Nome da companhia aérea")
@@ -86,7 +86,7 @@ class TravelAppState(TypedDict):
     itinerary: str
     error: str | None
 
-
+# --- Nó de Extração (Sem alterações) ---
 def extract_info_node(state: TravelAppState) -> dict:
     print("--- 🔍 Extraindo Informações da Requisição ---")
     user_request = state['user_request']
@@ -134,7 +134,7 @@ def extract_info_node(state: TravelAppState) -> dict:
             "error": error_msg
         }
 
-
+# --- Agentes de Busca (Sem alterações) ---
 def flight_agent_node(state: TravelAppState) -> dict:
     print("--- ✈️ Agente de Voos: Chamando ferramenta ---")
     origin = state.get("origin")
@@ -210,126 +210,135 @@ def activity_agent_node(state: TravelAppState) -> dict:
         error_msg = f"{current_error + '; ' if current_error else ''}Erro ao buscar atividades: {e}"
         return {"activities": [], "error": error_msg}
 
-def format_list_of_dicts(data: List[Dict] | None, title: str) -> str:
-    if not data or (len(data) == 1 and data[0].get('id') == 'error'):
-        return f"\n**{title}:**\nNenhuma opção encontrada ou erro na busca.\n"
-    output = f"\n**{title}:**\n"
-    for idx, item in enumerate(data):
-        output += f"- Opção {idx+1}:\n"
-        for key, value in item.items():
-            if key != 'id': # Não mostra o 'id' (que é um link) no resumo
-                 output += f"  - {key.replace('_', ' ').capitalize()}: {value}\n"
-    return output
+# --- REMOVEMOS A FUNÇÃO ANTIGA format_list_of_dicts ---
 
-def integration_agent_node(state: TravelAppState) -> dict:
-    print("--- 🧾 Agente de Integração: Montando o itinerário final ---")
+
+# --- MUDANÇA PRINCIPAL: O NOVO AGENTE CURADOR/INTEGRADOR ---
+def curate_and_report_node(state: TravelAppState) -> dict:
+    print("--- 🧠 Agente Curador: Analisando e selecionando os melhores resultados ---")
 
     initial_error = state.get("error")
-    found_flights = state.get("flights")
-    found_hotels = state.get("hotels")
-    found_activities = state.get("activities")
+    
+    # Filtra resultados que são erros
+    def filter_errors(results: List[Dict] | None) -> List[Dict]:
+        if not results:
+            return []
+        return [item for item in results if item.get("id") != "error"]
 
+    found_flights = filter_errors(state.get("flights"))
+    found_hotels = filter_errors(state.get("hotels"))
+    found_activities = filter_errors(state.get("activities"))
+
+    # Converte os resultados limpos para JSON para enviar ao LLM
+    flights_json = json.dumps(found_flights, indent=2, ensure_ascii=False)
+    hotels_json = json.dumps(found_hotels, indent=2, ensure_ascii=False)
+    activities_json = json.dumps(found_activities, indent=2, ensure_ascii=False)
+
+    # Se houver um erro de extração e NENHUMA ferramenta retornou dados, encerra
     if initial_error and not found_flights and not found_hotels and not found_activities:
          print(f"Retornando erro inicial: {initial_error}")
          return {
             "itinerary": f"Erro no planejamento: {initial_error}\nPor favor, tente refazer a busca com mais detalhes.",
             "flights": [], "hotels": [], "activities": [],
             "origin": state.get("origin"), "destination": state.get("destination"),
-            "start_date": state.get("start_date"), "end_date": state.get("end_date")
+            "start_date": state.get("start_date"), "end_date": state.get("end_date"),
+            "error": initial_error
          }
 
-    flights_str = format_list_of_dicts(found_flights, "Opções de Voos")
-    hotels_str = format_list_of_dicts(found_hotels, "Opções de Hotéis")
-    activities_str = format_list_of_dicts(found_activities, "Sugestões de Atividades")
-
-    error_parts = []
-    if initial_error: # Erro da extração
-        error_parts.append(initial_error)
-    
-    # Verifica se os resultados não são apenas a mensagem de erro da ferramenta
-    if not found_flights or (len(found_flights) == 1 and found_flights[0].get('id') == 'error'):
-        error_parts.append("Não foi possível buscar voos.")
-    if not found_hotels or (len(found_hotels) == 1 and found_hotels[0].get('id') == 'error'):
-        error_parts.append("Não foi possível buscar hotéis.")
-    if not found_activities or (len(found_activities) == 1 and found_activities[0].get('id') == 'error'):
-        error_parts.append("Não foi possível buscar atividades.")
-
-    error_str = f"\n**Avisos:**\n- {'\n- '.join(error_parts)}\n" if error_parts else ""
-
-
+    # Este é o novo prompt "inteligente"
     summary_prompt = f"""
-    Você é o agente de integração mestre. Sua tarefa é pegar as informações
-    coletadas pelos outros agentes e apresentá-las ao usuário de forma clara,
-    organizada e amigável, como um plano de viagem inicial.
+    Você é um agente de viagens especialista e seu trabalho é criar um "Relatório de Recomendações"
+    para um usuário. Você recebeu dados brutos de ferramentas de busca e agora deve analisá-los,
+    selecionar as melhores opções e justificar suas escolhas.
 
     O pedido original do usuário foi:
-    {state['user_request']}
+    "{state['user_request']}"
 
+    Informações da Viagem:
     Origem: {state.get('origin', 'Não extraída')}
     Destino: {state.get('destination', 'Não extraído')}
     Período: {state.get('start_date', 'Não extraído')} a {state.get('end_date', 'Não extraído')}
 
-    {flights_str}
-    {hotels_str}
-    {activities_str}
-    {error_str}
+    --- DADOS BRUTOS DAS FERRAMENTAS ---
 
-    Compile tudo isso em um único itinerário. Adicione uma saudação amigável no início
-    e uma frase de encerramento (ex: "Espero que goste das opções! Se precisar ajustar algo, me diga.").
-    Mencione brevemente se alguma das seções não teve resultados ou apresentou erro.
+    Opções de Voos Encontradas:
+    {flights_json}
+
+    Opções de Hotéis Encontradas:
+    {hotels_json}
+
+    Opções de Atividades Encontradas:
+    {activities_json}
+
+    --- SEU RELATÓRIO DE RECOMENDAÇÃO ---
+
+    Sua tarefa é gerar um relatório em Markdown (use #, ##, * e -) que:
+    1.  Comece com uma saudação amigável e um resumo da viagem.
+    2.  Analise as listas JSON acima.
+    3.  Selecione as **melhores 1-2 opções de voos**. Justifique (ex: "Melhor rota", "Menos paradas").
+    4.  Selecione as **melhores 3 opções de hotéis**. Justifique (ex: "Ótima localização", "Bom custo-benefício").
+    5.  Selecione as **melhores 4-5 atividades** para criar um roteiro variado. Justifique (ex: "Imperdível em Curitiba", "Bom para um dia chuvoso").
+    6.  Se alguma categoria não tiver resultados (lista vazia), informe ao usuário amigavelmente (ex: "Não encontrei voos para este período, mas veja os hotéis...").
+    7.  Termine com uma frase de encerramento.
+
+    O foco é na **QUALIDADE** da seleção, não na quantidade. Pense como um agente de viagens real.
+
+    Comece o relatório:
     """
 
-    print("--- 🤖 Formatando o itinerário completo... ---")
+    print("--- 🤖 Gerando relatório de recomendações com o Gemini... ---")
 
     chain = llm | StrOutputParser()
-    response = chain.invoke(summary_prompt)
+    report = chain.invoke(summary_prompt)
 
+    # Retorna o relatório (itinerary) e TAMBÉM as listas filtradas
     return {
-        "itinerary": response,
-        "flights": found_flights or [],
-        "hotels": found_hotels or [],
-        "activities": found_activities or [],
+        "itinerary": report,
+        "flights": found_flights,
+        "hotels": found_hotels,
+        "activities": found_activities,
         "origin": state.get("origin"),
         "destination": state.get("destination"),
         "start_date": state.get("start_date"),
         "end_date": state.get("end_date"),
-        "error": initial_error or (error_str if error_str else None)
+        "error": initial_error
     }
 
-# --- Definição do Grafo (sem mudanças) ---
+
+# --- Definição do Grafo (ATUALIZADO) ---
 print("Construindo o gráfico de agentes LangGraph...")
 workflow = StateGraph(TravelAppState)
 workflow.add_node("extract_info", extract_info_node)
 workflow.add_node("flights", flight_agent_node)
 workflow.add_node("hotels", hotel_agent_node)
 workflow.add_node("activities", activity_agent_node)
-workflow.add_node("integrator", integration_agent_node)
+# Renomeamos o último nó para refletir sua nova função
+workflow.add_node("curate_and_report", curate_and_report_node) 
+
 workflow.set_entry_point("extract_info")
 workflow.add_edge("extract_info", "flights")
 workflow.add_edge("flights", "hotels")
 workflow.add_edge("hotels", "activities")
-workflow.add_edge("activities", "integrator")
-workflow.add_edge("integrator", END)
+# A borda final agora aponta para o novo nó curador
+workflow.add_edge("activities", "curate_and_report")
+workflow.add_edge("curate_and_report", END)
+
 app = workflow.compile()
 print("Gráfico compilado com sucesso.")
 
 # --- Execução __main__ (sem mudanças) ---
 if __name__ == "__main__":
     print("\n--- Iniciando Planejamento da Viagem (Execução Direta) ---")
-    user_input = "Planeje uma viagem de São Paulo para Paris de 2026-05-10 até 2026-05-17"
+    user_input = "Planeje uma viagem de São Paulo para Curitiba de 2025-12-10 até 2025-12-17"
     initial_state = TravelAppState( user_request= user_input, origin=None, destination= None, start_date= None, end_date= None, flights= None, hotels= None, activities= None, itinerary= "", error= None )
     try:
         final_response_state = app.invoke(initial_state)
         print("\n--- Planejamento Concluído! ---")
         print("\n" + "="*50)
-        print("             ITINERÁRIO FINAL GERADO")
+        print("             RELATÓRIO FINAL GERADO")
         print("="*50 + "\n")
         print(final_response_state.get('itinerary', "Nenhum itinerário gerado."))
-        print("\n--- Dados Brutos ---")
-        print("Origem:", final_response_state.get('origin'))
-        print("Destino:", final_response_state.get('destination'))
-        print("Início:", final_response_state.get('start_date'))
-        print("Fim:", final_response_state.get('end_date'))
+        print("\n--- Dados Brutos (Filtrados) ---")
         print("Voos:", final_response_state.get('flights'))
         print("Hotéis:", final_response_state.get('hotels'))
         print("Atividades:", final_response_state.get('activities'))
