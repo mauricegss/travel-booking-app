@@ -7,7 +7,7 @@ from pydantic.v1 import BaseModel, Field
 from functools import lru_cache
 from tavily import TavilyClient
 
-# --- Helper de Localização (Corrigido para pedir JSON) ---
+# --- Helper de Localização (JSON) ---
 @lru_cache(maxsize=100)
 def _get_iata_code(city_name: str) -> str | None:
     try:
@@ -17,14 +17,10 @@ def _get_iata_code(city_name: str) -> str | None:
         return None
     
     print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
-    
-    # --- INÍCIO DA CORREÇÃO ---
-    # Pedir JSON é mais robusto do que pedir "APENAS 3 LETRAS"
     query = f"""
     Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}?
     Responda APENAS com um objeto JSON no formato: {{"iataCode": "XXX"}}
     """
-    # --- FIM DA CORREÇÃO ---
     
     try:
         response = tavily_client.search(query=query, search_depth="basic", include_answer=True)
@@ -32,8 +28,6 @@ def _get_iata_code(city_name: str) -> str | None:
         
         if answer:
             print(f"Tavily (IATA) Answer: {answer}")
-            
-            # Limpa a resposta da Tavily
             json_str = answer.strip().replace("```json", "").replace("```", "").strip()
             data = json.loads(json_str)
 
@@ -74,13 +68,13 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
     if not dest_iata:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
 
-    API_URL = "http://api.aviationstack.com/v1/flights" # HTTP no plano gratuito
+    API_URL = "http://api.aviationstack.com/v1/flights"
     
     params = {
         "access_key": API_KEY,
         "dep_iata": origin_iata,
         "arr_iata": dest_iata,
-        "flight_status": "scheduled", 
+        "flight_status": "scheduled",
         "limit": 5
     }
 
@@ -97,15 +91,25 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
             airline_name = flight.get('airline', {}).get('name', 'N/A')
             flight_number = flight.get('flight', {}).get('number', '')
             
-            fallback_url = f"https://www.google.com/flights?q=Voo+{origin_iata}+para+{dest_iata}"
+            # --- INÍCIO DA MELHORIA ---
+            # 1. Cria um link de busca de preço muito melhor
+            #    (O frontend espera um ID que seja um link clicável)
+            google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin.replace(' ', '+')}+para+{destination.replace(' ', '+')}+em+{departure_date}"
             
+            # 2. Informa o utilizador sobre o plano gratuito
+            price_text = "Preço N/A (Plano Grátis)"
+            
+            # 3. Dá uma 'duração' mais informativa
+            duration_text = f"Rota: {origin_iata} ➔ {dest_iata} (Voo {flight_number})"
+            # --- FIM DA MELHORIA ---
+
             formatted_results.append({
-                "id": fallback_url,
+                "id": google_flights_url, # <-- Melhoria 1
                 "airline": airline_name,
                 "departure": "N/A",
                 "arrival": "N/A",
-                "duration": f"Voo {airline_name} {flight_number}",
-                "price": "Verificar Preço",
+                "duration": duration_text, # <-- Melhoria 3
+                "price": price_text, # <-- Melhoria 2
                 "stops": 0
             })
         
