@@ -2,8 +2,8 @@ from typing import List, Dict, Optional
 import os
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from tavily import TavilyClient 
-from urllib.parse import urlparse # <-- ADICIONE IMPORT
+from amadeus import ResponseError
+from .amadeus_client import amadeus, get_location_data # <-- Importa nosso cliente
 
 class FlightSearchInput(BaseModel):
     origin: str = Field(description="Cidade ou aeroporto de origem.")
@@ -12,54 +12,71 @@ class FlightSearchInput(BaseModel):
     return_date: Optional[str] = Field(None, description="Data de retorno no formato AAAA-MM-DD (opcional).")
     passengers: int = Field(default=1, description="Número de passageiros.")
 
-# --- NOVA FUNÇÃO HELPER ---
-def _get_domain(url: str) -> str:
-    if not url:
-        return "Fonte desconhecida"
-    try:
-        domain = urlparse(url).netloc
-        # Remove "www." se existir
-        if domain.startswith("www."):
-            domain = domain[4:]
-        return domain
-    except Exception:
-        return "Fonte desconhecida"
-# --- FIM DA NOVA FUNÇÃO ---
-
 @tool(args_schema=FlightSearchInput)
 def search_flights(origin: str, destination: str, departure_date: str, return_date: Optional[str] = None, passengers: int = 1) -> List[Dict]:
-    """Busca por opções de voos na web com base na origem, destino, datas e número de passageiros."""
-    print(f"Tool: Buscando voos REAIS de {origin} para {destination} de {departure_date} {('até ' + return_date) if return_date else ''}...")
+    """Busca por opções de voos na API Amadeus com base na origem, destino, datas e número de passageiros."""
+    print(f"Tool: Buscando voos REAIS (Amadeus) de {origin} para {destination}...")
+
+    if not amadeus:
+        return [{"id": "error", "airline": "Cliente Amadeus não inicializado. Verifique as API keys.", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+
+    origin_data = get_location_data(origin)
+    dest_data = get_location_data(destination)
+
+    if not origin_data or not origin_data.get('iataCode'):
+        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+    if not dest_data or not dest_data.get('iataCode'):
+        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+
+    origin_code = origin_data['iataCode']
+    dest_code = dest_data['iataCode']
 
     try:
-        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-    except KeyError:
-        return [{"id": "error", "airline": "API Key de Busca (Tavily) não configurada", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        search_params = {
+            'originLocationCode': origin_code,
+            'destinationLocationCode': dest_code,
+            'departureDate': departure_date,
+            'adults': passengers,
+            'nonStop': 'false',
+            'max': 5, # Pede os 5 primeiros resultados
+            'currencyCode': 'BRL' # Pede preços em Reais Brasileiros
+        }
+        if return_date:
+            search_params['returnDate'] = return_date
 
-    query = f"voos de {origin} para {destination} partindo em {departure_date} e retornando em {return_date} para {passengers} passageiro(s)"
-
-    try:
-        search_response = tavily_client.search(query=query, search_depth="basic", include_answer=False, max_results=5)
-        web_results = search_response.get("results", [])
+        response = amadeus.shopping.flight_offers_search.get(**search_params)
         
-        formatted_results = []
-        if not web_results:
-             return []
+        dictionaries = response.result.get('dictionaries', {})
+        carriers = dictionaries.get('carriers', {})
 
-        for result in web_results:
-            url = result.get("url")
+        formatted_results = []
+        for offer in response.data:
+            # Pega o nome da companhia aérea do dicionário
+            airline_code = offer['itineraries'][0]['segments'][0]['carrierCode']
+            airline_name = carriers.get(airline_code, airline_code)
+            
+            # Pega a duração (ex: 'PT5H30M' -> 5H 30M)
+            duration_raw = offer['itineraries'][0]['duration'][2:].replace('H', 'H ').replace('M', 'M')
+            
+            # O frontend espera um link. Como a API não dá um, criamos um link de busca
+            fallback_url = f"https://www.google.com/flights?q=Voo+{origin_code}+para+{dest_code}+em+{departure_date}"
+            
             formatted_results.append({
-                "id": url, 
-                "airline": _get_domain(url), # <-- MUDANÇA AQUI
-                "departure": "N/A",
+                "id": fallback_url,
+                "airline": airline_name,
+                "departure": "N/A", # API Amadeus é complexa para horários, mantemos simples
                 "arrival": "N/A",
-                "duration": result.get("title", "Verificar detalhes"),
-                "price": "Verificar no site",
-                "stops": 0 
+                "duration": duration_raw,
+                "price": f"R$ {offer['price']['total']}",
+                "stops": len(offer['itineraries'][0]['segments']) - 1
             })
         
-        print(f"Retornando {len(formatted_results)} opções de voo encontradas na web.")
+        print(f"Retornando {len(formatted_results)} opções de voo da Amadeus.")
         return formatted_results
 
+    except ResponseError as e:
+        print(f"Erro na API Amadeus (Voos): {e.description}")
+        return [{"id": "error", "airline": f"Erro na API de voos: {e.description}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
     except Exception as e:
-        return [{"id": "error", "airline": f"Erro na busca: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        print(f"Erro inesperado (Voos): {e}")
+        return [{"id": "error", "airline": f"Erro ao buscar voos: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]

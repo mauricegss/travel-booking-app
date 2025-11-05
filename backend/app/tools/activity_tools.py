@@ -2,60 +2,71 @@ from typing import List, Dict
 import os
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from tavily import TavilyClient
-from urllib.parse import urlparse # <-- ADICIONE IMPORT
+from amadeus import ResponseError
+from .amadeus_client import amadeus, get_location_data
 
 class ActivitySearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino para atividades.")
     start_date: str = Field(description="Data de início das atividades no formato AAAA-MM-DD.")
     end_date: str = Field(description="Data de fim das atividades no formato AAAA-MM-DD.")
 
-# --- NOVA FUNÇÃO HELPER ---
-def _get_domain(url: str) -> str:
-    if not url:
-        return "Fonte desconhecida"
-    try:
-        domain = urlparse(url).netloc
-        if domain.startswith("www."):
-            domain = domain[4:]
-        return domain
-    except Exception:
-        return "Fonte desconhecida"
-# --- FIM DA NOVA FUNÇÃO ---
-
 @tool(args_schema=ActivitySearchInput)
 def search_activities(destination: str, start_date: str, end_date: str) -> List[Dict]:
-    """Busca por atividades e atrações na web no destino para o período especificado."""
-    print(f"Tool: Buscando atividades REAIS em {destination} entre {start_date} e {end_date}.")
+    """Busca por atividades e atrações na API Amadeus no destino para o período especificado."""
+    print(f"Tool: Buscando atividades REAIS (Amadeus) em {destination}...")
+    
+    if not amadeus:
+        return [{"id": "error", "title": "Cliente Amadeus não inicializado. Verifique as API keys.", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+
+    dest_data = get_location_data(destination)
+    if not dest_data or not dest_data.get('geoCode'):
+         return [{"id": "error", "title": f"Não foi possível encontrar coordenadas para: {destination}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+    
+    geo_code = dest_data['geoCode']
 
     try:
-        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-    except KeyError:
-        return [{"id": "error", "title": "API Key de Busca (Tavily) não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
-
-    query = f"atividades, passeios ou 'o que fazer' em {destination} para as datas {start_date} até {end_date}"
-
-    try:
-        search_response = tavily_client.search(query=query, search_depth="basic", include_answer=False, max_results=5)
-        web_results = search_response.get("results", [])
+        response = amadeus.shopping.activities.get(
+            latitude=geo_code['latitude'],
+            longitude=geo_code['longitude'],
+            radius=20
+        )
+        
+        # --- INÍCIO DA CORREÇÃO ---
+        # 1. Limita a 5 resultados
+        activities_to_process = response.data[:5]
+        # --- FIM DA CORREÇÃO ---
         
         formatted_results = []
-        if not web_results:
-             return []
-
-        for result in web_results:
-            url = result.get("url")
+        for activity in activities_to_process:
+            price = "Verificar no site"
+            if activity.get('price'):
+                price = f"{activity['price']['currencyCode']} {activity['price']['amount']}"
+            
+            booking_link = activity.get('links', {}).get('booking', 'N/A')
+            
+            if booking_link == 'N/A':
+                 booking_link = f"https://www.google.com/search?q={activity['name'].replace(' ', '+')}"
+            
+            # --- INÍCIO DA CORREÇÃO ---
+            # 2. Usa o campo 'rating' em vez de 'capacity' (Provedor Online)
+            capacity_text = f"Avaliação: {activity.get('rating', 'N/A')}"
+            # --- FIM DA CORREÇÃO ---
+            
             formatted_results.append({
-                "id": url, 
-                "title": result.get("title", "Título não disponível"),
-                "description": result.get("content", "Sem descrição..."),
+                "id": booking_link,
+                "title": activity['name'],
+                "description": activity.get('shortDescription', 'Sem descrição...'),
                 "duration": "N/A",
-                "price": "Verificar no site",
-                "capacity": _get_domain(url) # <-- MUDANÇA AQUI
+                "price": price,
+                "capacity": capacity_text # <-- Usa o texto de avaliação
             })
         
-        print(f"Retornando {len(formatted_results)} opções de atividade encontradas na web.")
+        print(f"Retornando {len(formatted_results)} opções de atividade da Amadeus.")
         return formatted_results
 
+    except ResponseError as e:
+        print(f"Erro na API Amadeus (Atividades): {e.description}")
+        return [{"id": "error", "title": f"Erro na API de atividades: {e.description}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
     except Exception as e:
-        return [{"id": "error", "title": f"Erro na busca: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        print(f"Erro inesperado (Atividades): {e}")
+        return [{"id": "error", "title": f"Erro ao buscar atividades: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]

@@ -1,5 +1,13 @@
 import os
 from dotenv import load_dotenv
+
+# --- CARREGUE O .ENV PRIMEIRO DE TUDO ---
+# Isso garante que 'os.environ' tenha as chaves ANTES do amadeus_client ser importado
+dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
+load_dotenv(dotenv_path=dotenv_path)
+print(f".env carregado de {dotenv_path}")
+# --- FIM DA MUDANÇA ---
+
 from typing import TypedDict, Annotated, List, Dict
 import operator
 import re
@@ -14,17 +22,15 @@ from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser
 
 from langgraph.graph import StateGraph, END
 
+# Agora estes imports podem usar o os.environ que foi carregado acima
 from app.tools.flight_tools import search_flights
 from app.tools.hotel_tools import search_hotels
 from app.tools.activity_tools import search_activities
 
 
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
-load_dotenv(dotenv_path=dotenv_path)
-
 if 'GOOGLE_API_KEY' not in os.environ:
     print("Erro: A variável de ambiente GOOGLE_API_KEY não foi definida.")
-    exit()
+    # (Não vamos sair, mas o LLM pode falhar)
 else:
     print("GOOGLE_API_KEY carregada com sucesso.")
 
@@ -62,17 +68,15 @@ class ActivityDetails(BaseModel):
     price: str = PydanticV2Field(description="Preço por pessoa")
     capacity: str = PydanticV2Field(description="Capacidade ou tamanho do grupo")
 
-# <<< MUDANÇA AQUI: Adiciona origin >>>
 class ExtractedInfo(BaseModel):
     origin: str | None = PydanticV2Field(None, description="Cidade ou local de origem da viagem.")
     destination: str | None = PydanticV2Field(None, description="Cidade ou local de destino principal.")
     start_date: str | None = PydanticV2Field(None, description="Data de início da viagem no formato AAAA-MM-DD.")
     end_date: str | None = PydanticV2Field(None, description="Data de fim da viagem no formato AAAA-MM-DD.")
 
-# <<< MUDANÇA AQUI: Adiciona origin >>>
 class TravelAppState(TypedDict):
     user_request: str
-    origin: str | None # Adicionado
+    origin: str | None 
     destination: str | None
     start_date: str | None
     end_date: str | None
@@ -89,7 +93,6 @@ def extract_info_node(state: TravelAppState) -> dict:
 
     parser = PydanticOutputParser(pydantic_object=ExtractedInfo)
 
-    # <<< MUDANÇA AQUI: Atualiza prompt para extrair origem >>>
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Você é um assistente especialista em extrair informações de viagem de texto. Extraia a origem, o destino principal, data de início (check-in) e data de fim (check-out) do pedido do usuário. Se alguma informação não estiver clara ou ausente, retorne null para o campo correspondente. Use o formato AAAA-MM-DD para datas.\n{format_instructions}"),
         ("human", "{user_request}")
@@ -102,16 +105,13 @@ def extract_info_node(state: TravelAppState) -> dict:
             "user_request": user_request,
             "format_instructions": parser.get_format_instructions()
         })
-        # <<< MUDANÇA AQUI: Loga a origem >>>
         print(f"Informações extraídas: Origem={extracted.origin}, Destino={extracted.destination}, Início={extracted.start_date}, Fim={extracted.end_date}")
 
         error_msg = None
-        # <<< MUDANÇA AQUI: Verifica origem também >>>
         if not extracted.origin or not extracted.destination or not extracted.start_date or not extracted.end_date:
              error_msg = "Não foi possível extrair origem, destino e/ou datas completas. Por favor, especifique claramente."
              print(f"Erro na extração: {error_msg}")
 
-        # <<< MUDANÇA AQUI: Retorna a origem >>>
         return {
             "origin": extracted.origin,
             "destination": extracted.destination,
@@ -121,16 +121,14 @@ def extract_info_node(state: TravelAppState) -> dict:
         }
     except Exception as e:
         print(f"Erro crítico ao extrair informações: {e}")
-        # <<< MUDANÇA AQUI: Fallback mais simples >>>
-        # Tenta extrair origem e destino com regex simples
         origin_match = re.search(r"(?:de|saindo de)\s+([A-Z][a-zA-Z\s,]+)", user_request)
         dest_match = re.search(r"(?:para|a|em)\s+([A-Z][a-zA-Z\s,]+)", user_request)
         origin_fb = origin_match.group(1).strip().rstrip(',') if origin_match else None
         dest_fb = dest_match.group(1).strip().rstrip(',') if dest_match else None
         error_msg = f"Não foi possível processar a extração automaticamente. Verifique o pedido. Erro: {e}"
         return {
-            "origin": origin_fb, # Pode ser None
-            "destination": dest_fb, # Pode ser None
+            "origin": origin_fb,
+            "destination": dest_fb,
             "start_date": None,
             "end_date": None,
             "error": error_msg
@@ -139,21 +137,18 @@ def extract_info_node(state: TravelAppState) -> dict:
 
 def flight_agent_node(state: TravelAppState) -> dict:
     print("--- ✈️ Agente de Voos: Chamando ferramenta ---")
-    # <<< MUDANÇA AQUI: Pega a origem do estado >>>
     origin = state.get("origin")
     dest = state.get("destination")
     start = state.get("start_date")
     end = state.get("end_date")
     current_error = state.get("error")
 
-    # <<< MUDANÇA AQUI: Verifica origem também >>>
     if not origin or not dest or not start or not end or current_error:
          error_msg = current_error or "Origem, destino ou datas ausentes para busca de voos."
          print(f"Erro voos: {error_msg}")
          return {"flights": [], "error": error_msg}
 
     try:
-        # <<< MUDANÇA AQUI: Usa a origem extraída >>>
         results = search_flights.invoke({
             "origin": origin,
             "destination": dest,
@@ -161,12 +156,10 @@ def flight_agent_node(state: TravelAppState) -> dict:
             "return_date": end,
             "passengers": 1
         })
-        return {"flights": results, "error": None}
+        return {"flights": results, "error": None} # Remove o erro anterior se a busca for bem sucedida
     except Exception as e:
         print(f"Erro ao chamar ferramenta de voos: {e}")
         return {"flights": [], "error": f"Erro ao buscar voos: {e}"}
-
-# --- hotel_agent_node e activity_agent_node (sem mudanças na lógica principal, apenas na propagação do erro) ---
 
 def hotel_agent_node(state: TravelAppState) -> dict:
     print("--- 🏨 Agente de Hospedagem: Chamando ferramenta ---")
@@ -178,7 +171,6 @@ def hotel_agent_node(state: TravelAppState) -> dict:
     if not dest or not start or not end or current_error:
         error_msg = current_error or "Destino ou datas ausentes para busca de hotéis."
         print(f"Erro hotéis: {error_msg}")
-        # Retorna lista vazia e mantém/define o erro
         return {"hotels": [], "error": error_msg}
 
     try:
@@ -187,12 +179,9 @@ def hotel_agent_node(state: TravelAppState) -> dict:
             "check_in_date": start,
             "check_out_date": end
         })
-        # Se sucesso, retorna resultados e limpa o erro *deste passo*
-        # (mas não sobrescreve um erro de passo anterior se já existir)
         return {"hotels": results, "error": state.get("error")}
     except Exception as e:
         print(f"Erro ao chamar ferramenta de hotéis: {e}")
-        # Retorna lista vazia e adiciona/mantém o erro
         error_msg = f"{current_error + '; ' if current_error else ''}Erro ao buscar hotéis: {e}"
         return {"hotels": [], "error": error_msg}
 
@@ -221,23 +210,20 @@ def activity_agent_node(state: TravelAppState) -> dict:
         error_msg = f"{current_error + '; ' if current_error else ''}Erro ao buscar atividades: {e}"
         return {"activities": [], "error": error_msg}
 
-# --- format_list_of_dicts (sem mudanças) ---
 def format_list_of_dicts(data: List[Dict] | None, title: str) -> str:
-    if not data:
+    if not data or (len(data) == 1 and data[0].get('id') == 'error'):
         return f"\n**{title}:**\nNenhuma opção encontrada ou erro na busca.\n"
     output = f"\n**{title}:**\n"
     for idx, item in enumerate(data):
         output += f"- Opção {idx+1}:\n"
         for key, value in item.items():
-            if key != 'id':
+            if key != 'id': # Não mostra o 'id' (que é um link) no resumo
                  output += f"  - {key.replace('_', ' ').capitalize()}: {value}\n"
     return output
 
 def integration_agent_node(state: TravelAppState) -> dict:
     print("--- 🧾 Agente de Integração: Montando o itinerário final ---")
 
-    # <<< MUDANÇA AQUI: Verifica erro de forma mais robusta >>>
-    # Se houve erro na extração e NADA foi encontrado, mostra o erro inicial
     initial_error = state.get("error")
     found_flights = state.get("flights")
     found_hotels = state.get("hotels")
@@ -256,18 +242,21 @@ def integration_agent_node(state: TravelAppState) -> dict:
     hotels_str = format_list_of_dicts(found_hotels, "Opções de Hotéis")
     activities_str = format_list_of_dicts(found_activities, "Sugestões de Atividades")
 
-    # Constrói a mensagem de erro final baseada nos erros acumulados ou falta de dados
     error_parts = []
     if initial_error: # Erro da extração
         error_parts.append(initial_error)
-    if not found_flights: error_parts.append("Não foi possível buscar voos.")
-    if not found_hotels: error_parts.append("Não foi possível buscar hotéis.")
-    if not found_activities: error_parts.append("Não foi possível buscar atividades.")
+    
+    # Verifica se os resultados não são apenas a mensagem de erro da ferramenta
+    if not found_flights or (len(found_flights) == 1 and found_flights[0].get('id') == 'error'):
+        error_parts.append("Não foi possível buscar voos.")
+    if not found_hotels or (len(found_hotels) == 1 and found_hotels[0].get('id') == 'error'):
+        error_parts.append("Não foi possível buscar hotéis.")
+    if not found_activities or (len(found_activities) == 1 and found_activities[0].get('id') == 'error'):
+        error_parts.append("Não foi possível buscar atividades.")
 
     error_str = f"\n**Avisos:**\n- {'\n- '.join(error_parts)}\n" if error_parts else ""
 
 
-    # <<< MUDANÇA AQUI: Adiciona origem ao prompt >>>
     summary_prompt = f"""
     Você é o agente de integração mestre. Sua tarefa é pegar as informações
     coletadas pelos outros agentes e apresentá-las ao usuário de forma clara,
@@ -295,17 +284,16 @@ def integration_agent_node(state: TravelAppState) -> dict:
     chain = llm | StrOutputParser()
     response = chain.invoke(summary_prompt)
 
-    # <<< MUDANÇA AQUI: Inclui origem na resposta >>>
     return {
         "itinerary": response,
         "flights": found_flights or [],
         "hotels": found_hotels or [],
         "activities": found_activities or [],
-        "origin": state.get("origin"), # Passa a origem extraída
+        "origin": state.get("origin"),
         "destination": state.get("destination"),
         "start_date": state.get("start_date"),
         "end_date": state.get("end_date"),
-        "error": initial_error or (error_str if error_str else None) # Passa o erro consolidado
+        "error": initial_error or (error_str if error_str else None)
     }
 
 # --- Definição do Grafo (sem mudanças) ---

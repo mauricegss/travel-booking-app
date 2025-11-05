@@ -2,8 +2,8 @@ from typing import List, Dict, Optional
 import os
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from tavily import TavilyClient
-from urllib.parse import urlparse # <-- ADICIONE IMPORT
+from amadeus import ResponseError
+from .amadeus_client import amadeus, get_location_data
 
 class HotelSearchInput(BaseModel):
     destination: str = Field(description="Cidade ou local de destino.")
@@ -12,52 +12,68 @@ class HotelSearchInput(BaseModel):
     adults: int = Field(default=1, description="Número de adultos.")
     rooms: int = Field(default=1, description="Número de quartos.")
 
-# --- NOVA FUNÇÃO HELPER ---
-def _get_domain(url: str) -> str:
-    if not url:
-        return "Fonte desconhecida"
-    try:
-        domain = urlparse(url).netloc
-        if domain.startswith("www."):
-            domain = domain[4:]
-        return domain
-    except Exception:
-        return "Fonte desconhecida"
-# --- FIM DA NOVA FUNÇÃO ---
-
 @tool(args_schema=HotelSearchInput)
 def search_hotels(destination: str, check_in_date: str, check_out_date: str, adults: int = 1, rooms: int = 1) -> List[Dict]:
-    """Busca por opções de hotéis na web com base no destino, datas, número de adultos e quartos."""
-    print(f"Tool: Buscando hotéis REAIS em {destination} de {check_in_date} até {check_out_date}...")
+    """Busca por opções de hotéis na API Amadeus com base no destino, datas, número de adultos e quartos."""
+    print(f"Tool: Buscando hotéis REAIS (Amadeus) em {destination} de {check_in_date} até {check_out_date}...")
+
+    if not amadeus:
+        return [{"id": "error", "name": "Cliente Amadeus não inicializado. Verifique as API keys.", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
+
+    dest_data = get_location_data(destination)
+    if not dest_data or not dest_data.get('iataCode'):
+         return [{"id": "error", "name": f"Não foi possível encontrar o código IATA para o destino: {destination}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
+    
+    city_code = dest_data['iataCode']
 
     try:
-        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-    except KeyError:
-        return [{"id": "error", "name": "API Key de Busca (Tavily) não configurada", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
-
-    query = f"Opções de hotéis em {destination} para {adults} adultos, de {check_in_date} até {check_out_date}"
-
-    try:
-        search_response = tavily_client.search(query=query, search_depth="basic", include_answer=False, max_results=5)
-        web_results = search_response.get("results", [])
+        # --- INÍCIO DA CORREÇÃO ---
+        # O nome correto do método é 'hotel_offers_search'
+        response = amadeus.shopping.hotel_offers_search.get(
+        # --- FIM DA CORREÇÃO ---
+            cityCode=city_code,
+            checkInDate=check_in_date,
+            checkOutDate=check_out_date,
+            adults=adults,
+            roomQuantity=rooms,
+            ratings='2,3,4,5',
+            bestRateOnly=True,
+            view='LIGHT',
+            lang='PT'
+        )
+        
+        # Limita a 5 resultados para não sobrecarregar a interface
+        offers_to_process = response.data[:5]
         
         formatted_results = []
-        if not web_results:
-             return []
-
-        for result in web_results:
-            url = result.get("url")
+        for offer in offers_to_process:
+            hotel = offer['hotel']
+            hotel_offer = offer['offers'][0]
+            
+            price = f"{hotel_offer['price']['currency']} {hotel_offer['price']['total']}"
+            
+            description = "Descrição não disponível."
+            if hotel.get('description') and hotel['description'].get('text'):
+                description = hotel['description']['text']
+            
+            hotel_name_query = hotel['name'].replace(' ', '+')
+            fallback_url = f"https://www.google.com/search?q=hotel+{hotel_name_query}+{destination}"
+            
             formatted_results.append({
-                "id": url,
-                "name": result.get("title", "Título não disponível"),
-                "location": _get_domain(url), # <-- MUDANÇA AQUI
-                "rating": 0,
-                "price": "Verificar no site",
-                "amenities": [result.get("content", "Sem descrição...")]
+                "id": fallback_url,
+                "name": hotel['name'],
+                "location": hotel.get('address', {}).get('lines', ['Endereço não informado'])[0],
+                "rating": int(hotel.get('rating', 0)),
+                "price": price,
+                "amenities": [description]
             })
         
-        print(f"Retornando {len(formatted_results)} opções de hotel encontradas na web.")
+        print(f"Retornando {len(formatted_results)} opções de hotel da Amadeus.")
         return formatted_results
 
+    except ResponseError as e:
+        print(f"Erro na API Amadeus (Hotéis): {e.description}")
+        return [{"id": "error", "name": f"Erro na API de hotéis: {e.description}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
     except Exception as e:
-        return [{"id": "error", "name": f"Erro na busca: {e}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
+        print(f"Erro inesperado (Hotéis): {e}")
+        return [{"id": "error", "name": f"Erro ao buscar hotéis: {e}", "location": "", "rating": 0, "price": "R$ 0", "amenities": []}]
