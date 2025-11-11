@@ -1,73 +1,94 @@
-# Welcome to your Lovable project
+# Travel Booking App - Agente de Viagens com IA
 
-## Project info
+Este é um aplicativo full-stack de planejamento de viagens que utiliza um sistema de agentes de IA, construído com **LangGraph** e o modelo **Gemini** do Google, para pesquisar e montar um roteiro de viagem coeso.
 
-**URL**: https://lovable.dev/projects/7f7f2d3f-5172-48e6-88ca-d091598b5a81
+O frontend é uma interface moderna construída com **React**, **Vite**, **TypeScript** e **shadcn-ui**. O backend é um servidor **FastAPI** em Python que orquestra os agentes de IA.
 
-## How can I edit this code?
+## 🤖 Conceito: Como Funciona
 
-There are several ways of editing your application.
+O diferencial deste projeto é o **Agente Curador** no backend. Em vez de simplesmente despejar os resultados da API no frontend, o sistema segue um fluxo inteligente:
 
-**Use Lovable**
+1.  **Frontend (React):** O usuário insere a Origem, Destino e Datas na `SearchBar`.
+2.  **Backend (FastAPI):** O frontend envia uma *única string* de linguagem natural (ex: "Planeje uma viagem de São Paulo para Curitiba...") para o endpoint `/plan-trip`.
+3.  **Backend (LangGraph):** O servidor FastAPI aciona um grafo LangGraph (`app.py`) que orquestra vários agentes:
+    * **Agente Extrator:** Um LLM (Gemini) primeiro extrai as entidades estruturadas (origem, destino, datas) da string.
+    * **Agentes de Ferramentas:** O grafo chama as ferramentas de busca com os dados extraídos:
+        * `search_flights`: Busca voos usando **AviationStack** e **Tavily** (para códigos IATA).
+        * `Google Hotels`: Busca hotéis usando **Geoapify**.
+        * `search_activities`: Busca atividades e pontos turísticos usando **Geoapify**.
+    * **Agente Curador (O Cérebro):** Um nó final do LangGraph (`curate_and_report_node`) recebe *todos* os dados brutos em JSON das ferramentas. Ele então usa o Gemini com um prompt detalhado para atuar como um "agente de viagens especialista", selecionando as **melhores 1-2 opções de voos**, **3 hotéis** e **4-5 atividades**, escrevendo um relatório coeso e justificado em Markdown.
+4.  **Resultado (React):** O frontend recebe o relatório final em Markdown e os dados filtrados, exibindo-os na página de resultados (`SearchResults.tsx`).
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/7f7f2d3f-5172-48e6-88ca-d091598b5a81) and start prompting.
+## 🛠️ Tecnologias Utilizadas
 
-Changes made via Lovable will be committed automatically to this repo.
+| Área | Tecnologia | Propósito |
+| :--- | :--- | :--- |
+| **Frontend** | React | Biblioteca principal da UI. |
+| | Vite | Build tool e servidor de desenvolvimento. |
+| | TypeScript | Tipagem estática. |
+| | Tailwind CSS | Estilização CSS. |
+| | shadcn-ui | Componentes de UI (Cards, Botões, etc.). |
+| | React Router | Roteamento de páginas (`/` e `/search-results`). |
+| **Backend** | Python | Linguagem principal. |
+| | FastAPI | Servidor web ASGI para a API. |
+| | LangGraph | Orquestração do fluxo de agentes (StateGraph). |
+| | LangChain | Integrações (`langchain-google-genai`). |
+| | Google Gemini | Modelo de LLM para extração e curadoria. |
+| **APIs** | Tavily | Busca web (usada para encontrar códigos IATA). |
+| | AviationStack | API de dados de voos (horários). |
+| | Geoapify | API de geocodificação e busca de locais (Hotéis, Atividades). |
 
-**Use your preferred IDE**
+## 🚀 Configuração e Execução
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### 1. Pré-requisitos
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+* Node.js (v18+) e npm
+* Python (v3.10+) e pip
+* Chaves de API para:
+    * Google (Gemini)
+    * Tavily
+    * AviationStack
+    * Geoapify
 
-Follow these steps:
+### 2. Backend (FastAPI + LangGraph)
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+Primeiro, configure e inicie o servidor de backend.
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+```bash
+# 1. Navegue até a pasta do backend
+cd backend
 
-# Step 3: Install the necessary dependencies.
-npm i
+# 2. Crie um ambiente virtual e ative-o
+python -m venv venv
+source venv/bin/activate  # No Windows: .\venv\Scripts\activate
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+# 3. Instale as dependências
+pip install -r requirements.txt
+
+# 4. Configure as variáveis de ambiente
+# Copie o arquivo de exemplo
+cp .env.example .env
+
+# Edite o arquivo .env e adicione suas chaves de API
+# GOOGLE_API_KEY=...
+# TAVILY_API_KEY=...
+# AVIATIONSTACK_API_KEY=...
+# GEOAPIFY_API_KEY=...
+
+# 5. Inicie o servidor FastAPI
+# O frontend espera que ele rode na porta 8000
+uvicorn app.main:api --host 127.0.0.1 --port 8000 --reload
+
+### 3. Frontend (React + Vite)
+
+Em um novo terminal, configure e inicie o frontend.
+
+# 1. Volte para o diretório raiz (se estiver em /backend)
+cd ..
+
+# 2. Instale as dependências do Node.js
+npm install
+
+# 3. Inicie o servidor de desenvolvimento do Vite
 npm run dev
-```
-
-**Edit a file directly in GitHub**
-
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
-
-**Use GitHub Codespaces**
-
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/7f7f2d3f-5172-48e6-88ca-d091598b5a81) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+Abra seu navegador em http://localhost:8080 (ou qualquer porta que o Vite indicar) para ver o aplicativo em execução.
