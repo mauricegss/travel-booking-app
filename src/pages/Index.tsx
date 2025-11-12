@@ -13,7 +13,7 @@ const Index = () => {
     {
       icon: Hotel,
       title: "Hospedagem",
-      description: "Conecta-se a APIs de hotéis e aplica filtros considerando seu orçamento." 
+      description: "Conecta-se a APIs de hotéis e aplica filtros de busca." 
     },
     {
       icon: MapPinned,
@@ -23,7 +23,7 @@ const Index = () => {
     {
       icon: Sparkles,
       title: "Integração e Reserva",
-      description: "Combina informações e oferece interface simplificada para confirmação." 
+      description: "Combina informações e oferece um relatório simplificado." 
     }
   ];
 

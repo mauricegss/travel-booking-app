@@ -8,3 +8,4 @@ langgraph
 langchain-google-genai
 tavily-python
 unidecode
+google-search-results

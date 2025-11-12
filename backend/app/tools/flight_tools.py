@@ -1,19 +1,19 @@
 from typing import List, Dict, Optional
 import os
-import requests
 import json
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
-from functools import lru_cache
+from serpapi import GoogleSearch
 from tavily import TavilyClient
+from functools import lru_cache
 
-# --- Helper de Localização (JSON) ---
+# --- O Helper de IATA (Tavily) ---
 @lru_cache(maxsize=100)
 def _get_iata_code(city_name: str) -> str | None:
     try:
         tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
     except KeyError:
-        print("ERRO (Voos): TAVILY_API_KEY não configurada.")
+        print("ERRO (Voo-Helper): TAVILY_API_KEY não configurada.")
         return None
     
     print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
@@ -43,6 +43,7 @@ def _get_iata_code(city_name: str) -> str | None:
         return None
 # --- Fim do Helper ---
 
+
 class FlightSearchInput(BaseModel):
     origin: str = Field(description="Cidade ou aeroporto de origem.")
     destination: str = Field(description="Cidade ou aeroporto de destino.")
@@ -52,86 +53,96 @@ class FlightSearchInput(BaseModel):
 
 @tool(args_schema=FlightSearchInput)
 def search_flights(origin: str, destination: str, departure_date: str, **kwargs) -> List[Dict]:
-    """Busca por horários de voos na API AviationStack com base na origem e destino."""
-    print(f"Tool: Buscando voos REAIS (AviationStack) de {origin} para {destination}...")
+    """Busca por voos usando a API Google Flights da SerpAPI."""
+    print(f"Tool: Buscando voos REAIS (SerpAPI Google Flights) de {origin} para {destination}...")
     
-    # --- [INÍCIO DA MUDANÇA] ---
-    # Pega o return_date dos argumentos extras
     return_date = kwargs.get('return_date')
-    # --- [FIM DA MUDANÇA] ---
+    passengers = kwargs.get('passengers', 1)
 
     try:
-        API_KEY = os.environ["AVIATIONSTACK_API_KEY"]
-    except KeyError:
-        return [{"id": "error", "airline": "AVIATIONSTACK_API_KEY não configurada.", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        SERPAPI_KEY = os.environ["SERPAPI_API_KEY"]
+        if "TAVILY_API_KEY" not in os.environ:
+            raise KeyError("TAVILY_API_KEY não configurada no .env")
+            
+    except KeyError as e:
+        error_msg = f"{e.args[0]} não configurada."
+        return [{"id": "error", "airline": error_msg, "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
 
     origin_iata = _get_iata_code(origin)
     dest_iata = _get_iata_code(destination)
-    
+
     if not origin_iata:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
     if not dest_iata:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
 
-    API_URL = "http://api.aviationstack.com/v1/flights"
-    
     params = {
-        "access_key": API_KEY,
-        "dep_iata": origin_iata,
-        "arr_iata": dest_iata,
-        "flight_status": "scheduled",
-        "limit": 5 # A API gratuita é muito limitada, 5 é um bom número
+        "engine": "google_flights",
+        "api_key": SERPAPI_KEY,
+        "departure_id": origin_iata,
+        "arrival_id": dest_iata,
+        "outbound_date": departure_date,
+        "adults": passengers,
+        "currency": "BRL",
+        "hl": "pt-br",
+        "gl": "br"
     }
 
+    if return_date:
+        params["return_date"] = return_date
+
     try:
-        response = requests.get(API_URL, params=params)
-        response.raise_for_status()
-        data = response.json().get("data", [])
+        search = GoogleSearch(params)
+        results = search.get_dict()
         
+        if "error" in results:
+            error_msg = results["error"]
+            print(f"!!! Erro da SerpAPI (Voos): {error_msg}")
+            return [{"id": "error", "airline": f"Erro na API de voos: {error_msg}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+
         formatted_results = []
-        if not data:
+        data_to_parse = results.get("best_flights", [])
+        
+        if not data_to_parse:
+            data_to_parse = results.get("other_flights", [])
+
+        if not data_to_parse:
+            print("SerpAPI não retornou 'best_flights' ou 'other_flights', mas não reportou erro.")
             return []
 
-        for flight in data:
-            airline_name = flight.get('airline', {}).get('name', 'N/A')
-            flight_number = flight.get('flight', {}).get('number', '')
-            
+        for flight in data_to_parse:
+            legs = flight.get("flights", [])
+            if not legs:
+                continue # Pula este resultado de voo se não tiver trechos
+
+            outbound_leg = legs[0]
+            departure_time = outbound_leg.get("departure_airport", {}).get("time", "N/A")
+            arrival_time = outbound_leg.get("arrival_airport", {}).get("time", "N/A")
+
             # --- [INÍCIO DA MUDANÇA] ---
-            # 1. Cria um link de busca de preço muito melhor
-            origin_query = origin.replace(' ', '+')
-            dest_query = destination.replace(' ', '+')
-            
-            if return_date:
-                # Se temos data de volta, o link é de ida E volta
-                google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin_query}+para+{dest_query}+de+{departure_date}+a+{return_date}"
-                duration_text = f"Link de busca: {origin_iata} ➔ {dest_iata} (Ida e Volta)"
-            else:
-                # Se não, o link é só de ida
-                google_flights_url = f"https://www.google.com/flights?q=Voo+de+{origin_query}+para+{dest_query}+em+{departure_date}"
-                duration_text = f"Link de busca: {origin_iata} ➔ {dest_iata} (S_oacute; Ida)"
-            
-            # 2. Informa o utilizador sobre o plano gratuito
-            price_text = "Verificar no site"
+            # Se for uma viagem de ida E VOLTA, formatamos os dados de forma diferente
+            if return_date and len(legs) > 1:
+                return_leg = legs[1]
+                
+                # Sobrescrevemos as variáveis para refletir a viagem completa
+                departure_time = f"Ida: {departure_time}" # Ex: "Ida: 09:55"
+                # Usamos a partida do voo de volta como "chegada" (horário de retorno)
+                arrival_time = f"Volta: {return_leg.get('departure_airport', {}).get('time', 'N/A')}" # Ex: "Volta: 18:00"
             # --- [FIM DA MUDANÇA] ---
 
             formatted_results.append({
-                "id": google_flights_url, # <-- Mudança 1
-                "airline": airline_name,
-                "departure": "N/A",
-                "arrival": "N/A",
-                "duration": duration_text, # <-- Mudança 2
-                "price": price_text, 
-                "stops": 0
+                "id": flight.get("google_flights_url", "default_id"),
+                "airline": flight.get("airline_logo_text", outbound_leg.get("airline", "N/A")),
+                "departure": departure_time, # <-- Agora contém "Ida: ..."
+                "arrival": arrival_time,     # <-- Agora contém "Volta: ..."
+                "duration": flight.get("total_duration", "N/A"), # Duração total (ida+volta)
+                "price": f"R$ {flight.get('price', 0)}", 
+                "stops": flight.get("stops", 0)
             })
         
-        print(f"Retornando {len(formatted_results)} opções de voo da AviationStack.")
-        # Retorna apenas a *primeira* opção (o link de busca), 
-        # já que todos os links gerados serão iguais
-        return [formatted_results[0]] if formatted_results else []
+        print(f"Retornando {len(formatted_results)} opções de voo da SerpAPI.")
+        return formatted_results[:10]
 
-    except requests.exceptions.HTTPError as e:
-        print(f"Erro na API AviationStack (Voos): {e.response.text}")
-        return [{"id": "error", "airline": f"Erro na API de voos: {e.response.text}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
     except Exception as e:
-        print(f"Erro inesperado (Voos): {e}")
-        return [{"id": "error", "airline": f"Erro ao buscar voos: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        print(f"Erro inesperado (Voos - SerpAPI): {e}")
+        return [{"id": "error", "airline": f"Erro ao buscar voos na SerpAPI: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
