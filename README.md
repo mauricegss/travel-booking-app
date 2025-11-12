@@ -78,11 +78,13 @@ cp .env.example .env
 # 5. Inicie o servidor FastAPI
 # O frontend espera que ele rode na porta 8000
 uvicorn app.main:api --host 127.0.0.1 --port 8000 --reload
+```
 
 ### 3. Frontend (React + Vite)
 
 Em um novo terminal, configure e inicie o frontend.
 
+```bash
 # 1. Volte para o diretório raiz (se estiver em /backend)
 cd ..
 
@@ -91,4 +93,6 @@ npm install
 
 # 3. Inicie o servidor de desenvolvimento do Vite
 npm run dev
+```
+
 Abra seu navegador em http://localhost:8080 (ou qualquer porta que o Vite indicar) para ver o aplicativo em execução.
