@@ -1,14 +1,14 @@
 import os
 from dotenv import load_dotenv
-import json # <-- IMPORTAR JSON
+import json 
 
-# --- CARREGUE O .ENV PRIMEIRO DE TUDO ---
+# --- CARREGUE O .ENV ---
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '.env')
 load_dotenv(dotenv_path=dotenv_path)
 print(f".env carregado de {dotenv_path}")
-# --- FIM DA MUDANÇA ---
+# --- FIM ---
 
-from typing import TypedDict, Annotated, List, Dict
+from typing import TypedDict, Annotated, List, Dict, Any
 import operator
 import re
 from langchain_core.exceptions import OutputParserException
@@ -22,15 +22,15 @@ from langchain_core.output_parsers import PydanticOutputParser, StrOutputParser
 
 from langgraph.graph import StateGraph, END
 
-# Agora estes imports podem usar o os.environ que foi carregado acima
+# Importar TODAS as ferramentas
 from app.tools.flight_tools import search_flights
 from app.tools.hotel_tools import search_hotels
 from app.tools.activity_tools import search_activities
+from app.tools.image_tools import search_image # <-- Importar a ferramenta de imagem (embora a usemos dentro das outras)
 
 
 if 'GOOGLE_API_KEY' not in os.environ:
     print("Erro: A variável de ambiente GOOGLE_API_KEY não foi definida.")
-    # (Não vamos sair, mas o LLM pode falhar)
 else:
     print("GOOGLE_API_KEY carregada com sucesso.")
 
@@ -42,7 +42,8 @@ except Exception as e:
     print(f"Erro ao inicializar o ChatGoogleGenerativeAI: {e}")
     exit()
 
-# --- Modelos Pydantic V2 (Sem alterações) ---
+# --- Modelos Pydantic V2 (Definições de dados) ---
+# (Estes são os mesmos de antes, mas agora vamos usá-los no PydanticOutputParser)
 class FlightDetails(BaseModel):
     id: str = PydanticV2Field(description="Identificador único do voo")
     airline: str = PydanticV2Field(description="Nome da companhia aérea")
@@ -53,20 +54,22 @@ class FlightDetails(BaseModel):
     stops: int = PydanticV2Field(description="Número de paradas")
 
 class HotelDetails(BaseModel):
-    id: str = PydanticV2Field(description="Identificador único do hotel")
+    id: str = PydanticV2Field(description="Identificador único do hotel (geralmente um link)")
     name: str = PydanticV2Field(description="Nome do hotel")
     location: str = PydanticV2Field(description="Localização ou bairro do hotel")
     rating: int = PydanticV2Field(description="Avaliação do hotel (ex: 3, 4, 5 estrelas)")
-    price: str = PydanticV2Field(description="Preço médio por noite")
+    price: str = PydanticV2Field(description="Preço (pode ser 'Verificar no site')")
     amenities: List[str] = PydanticV2Field(description="Lista de comodidades oferecidas")
+    image_url: str | None = PydanticV2Field(description="URL de uma imagem do hotel")
 
 class ActivityDetails(BaseModel):
-    id: str = PydanticV2Field(description="Identificador único da atividade")
+    id: str = PydanticV2Field(description="Identificador único da atividade (geralmente um link)")
     title: str = PydanticV2Field(description="Título da atividade")
     description: str = PydanticV2Field(description="Breve descrição da atividade")
     duration: str = PydanticV2Field(description="Duração estimada da atividade")
     price: str = PydanticV2Field(description="Preço por pessoa")
-    capacity: str = PydanticV2Field(description="Capacidade ou tamanho do grupo")
+    capacity: str = PydanticV2Field(description="Fonte da atividade (ex: Tourism, Leisure)")
+    image_url: str | None = PydanticV2Field(description="URL de uma imagem da atividade")
 
 class ExtractedInfo(BaseModel):
     origin: str | None = PydanticV2Field(None, description="Cidade ou local de origem da viagem.")
@@ -74,30 +77,48 @@ class ExtractedInfo(BaseModel):
     start_date: str | None = PydanticV2Field(None, description="Data de início da viagem no formato AAAA-MM-DD.")
     end_date: str | None = PydanticV2Field(None, description="Data de fim da viagem no formato AAAA-MM-DD.")
 
+# --- NOVOS MODELOS PARA A RESPOSTA CURADA ---
+
+class CuratedRecommendation(BaseModel):
+    """Um item (voo, hotel ou atividade) selecionado com uma justificativa."""
+    data: Dict[str, Any] = PydanticV2Field(description="O objeto JSON original completo do item (voo, hotel ou atividade).")
+    justification: str = PydanticV2Field(description="Breve justificativa (1-2 frases) do porquê este item foi recomendado.")
+
+class FinalReport(BaseModel):
+    """O relatório final estruturado contendo as seleções curadas e texto de apoio."""
+    summary_text: str = PydanticV2Field(description="Um texto introdutório amigável (2-3 frases) e um resumo da viagem.")
+    curated_flights: List[CuratedRecommendation] = PydanticV2Field(description="Lista de 1-2 recomendações de voos.")
+    curated_hotels: List[CuratedRecommendation] = PydanticV2Field(description="Lista de 2-3 recomendações de hotéis.")
+    curated_activities: List[CuratedRecommendation] = PydanticV2Field(description="Lista de 4-5 recomendações de atividades.")
+    closing_text: str = PydanticV2Field(description="Uma frase de encerramento amigável (1-2 frases).")
+
+# --- ESTADO DO GRAFO (ATUALIZADO) ---
 class TravelAppState(TypedDict):
     user_request: str
     origin: str | None 
     destination: str | None
     start_date: str | None
     end_date: str | None
-    flights: List[Dict] | None
-    hotels: List[Dict] | None
-    activities: List[Dict] | None
-    itinerary: str
+    
+    # Estes agora guardam os resultados brutos das ferramentas
+    raw_flights: List[Dict] | None
+    raw_hotels: List[Dict] | None
+    raw_activities: List[Dict] | None
+    
+    # O itinerário em Markdown foi substituído por este objeto
+    final_report: FinalReport | None 
+    
     error: str | None
 
-# --- Nó de Extração (Sem alterações) ---
+# --- Nó de Extração (Atualizado para o novo estado) ---
 def extract_info_node(state: TravelAppState) -> dict:
     print("--- 🔍 Extraindo Informações da Requisição ---")
     user_request = state['user_request']
-
     parser = PydanticOutputParser(pydantic_object=ExtractedInfo)
-
     prompt = ChatPromptTemplate.from_messages([
         ("system", "Você é um assistente especialista em extrair informações de viagem de texto. Extraia a origem, o destino principal, data de início (check-in) e data de fim (check-out) do pedido do usuário. Se alguma informação não estiver clara ou ausente, retorne null para o campo correspondente. Use o formato AAAA-MM-DD para datas.\n{format_instructions}"),
         ("human", "{user_request}")
     ])
-
     chain = prompt | llm | parser
 
     try:
@@ -121,101 +142,66 @@ def extract_info_node(state: TravelAppState) -> dict:
         }
     except Exception as e:
         print(f"Erro crítico ao extrair informações: {e}")
-        origin_match = re.search(r"(?:de|saindo de)\s+([A-Z][a-zA-Z\s,]+)", user_request)
-        dest_match = re.search(r"(?:para|a|em)\s+([A-Z][a-zA-Z\s,]+)", user_request)
-        origin_fb = origin_match.group(1).strip().rstrip(',') if origin_match else None
-        dest_fb = dest_match.group(1).strip().rstrip(',') if dest_match else None
-        error_msg = f"Não foi possível processar a extração automaticamente. Verifique o pedido. Erro: {e}"
-        return {
-            "origin": origin_fb,
-            "destination": dest_fb,
-            "start_date": None,
-            "end_date": None,
-            "error": error_msg
-        }
+        # Fallback simples (pode não ser necessário se o LLM for robusto)
+        return { "error": f"Não foi possível processar a extração. Erro: {e}" }
 
-# --- Agentes de Busca (Sem alterações) ---
+# --- Agentes de Busca (Atualizados para o novo estado) ---
 def flight_agent_node(state: TravelAppState) -> dict:
     print("--- ✈️ Agente de Voos: Chamando ferramenta ---")
-    origin = state.get("origin")
-    dest = state.get("destination")
-    start = state.get("start_date")
-    end = state.get("end_date")
-    current_error = state.get("error")
-
-    if not origin or not dest or not start or not end or current_error:
-         error_msg = current_error or "Origem, destino ou datas ausentes para busca de voos."
-         print(f"Erro voos: {error_msg}")
-         return {"flights": [], "error": error_msg}
-
+    # ... (mesma lógica de verificação de erro) ...
+    if state.get("error"):
+         return {"raw_flights": [], "error": state.get("error")}
+         
     try:
         results = search_flights.invoke({
-            "origin": origin,
-            "destination": dest,
-            "departure_date": start,
-            "return_date": end,
+            "origin": state["origin"],
+            "destination": state["destination"],
+            "departure_date": state["start_date"],
+            "return_date": state["end_date"],
             "passengers": 1
         })
-        return {"flights": results, "error": None} # Remove o erro anterior se a busca for bem sucedida
+        return {"raw_flights": results} # Salva em raw_flights
     except Exception as e:
         print(f"Erro ao chamar ferramenta de voos: {e}")
-        return {"flights": [], "error": f"Erro ao buscar voos: {e}"}
+        return {"raw_flights": [], "error": f"Erro ao buscar voos: {e}"}
 
 def hotel_agent_node(state: TravelAppState) -> dict:
     print("--- 🏨 Agente de Hospedagem: Chamando ferramenta ---")
-    dest = state.get("destination")
-    start = state.get("start_date")
-    end = state.get("end_date")
-    current_error = state.get("error") # Propaga erro, se houver
-
-    if not dest or not start or not end or current_error:
-        error_msg = current_error or "Destino ou datas ausentes para busca de hotéis."
-        print(f"Erro hotéis: {error_msg}")
-        return {"hotels": [], "error": error_msg}
+    if state.get("error"):
+         return {"raw_hotels": [], "error": state.get("error")}
 
     try:
         results = search_hotels.invoke({
-            "destination": dest,
-            "check_in_date": start,
-            "check_out_date": end
+            "destination": state["destination"],
+            "check_in_date": state["start_date"],
+            "check_out_date": state["end_date"]
         })
-        return {"hotels": results, "error": state.get("error")}
+        return {"raw_hotels": results} # Salva em raw_hotels
     except Exception as e:
         print(f"Erro ao chamar ferramenta de hotéis: {e}")
-        error_msg = f"{current_error + '; ' if current_error else ''}Erro ao buscar hotéis: {e}"
-        return {"hotels": [], "error": error_msg}
+        return {"raw_hotels": [], "error": f"Erro ao buscar hotéis: {e}"}
 
 
 def activity_agent_node(state: TravelAppState) -> dict:
     print("--- 🗺️ Agente de Atividades: Chamando ferramenta ---")
-    dest = state.get("destination")
-    start = state.get("start_date")
-    end = state.get("end_date")
-    current_error = state.get("error") # Propaga erro
-
-    if not dest or not start or not end or current_error:
-        error_msg = current_error or "Destino ou datas ausentes para busca de atividades."
-        print(f"Erro atividades: {error_msg}")
-        return {"activities": [], "error": error_msg}
+    if state.get("error"):
+         return {"raw_activities": [], "error": state.get("error")}
 
     try:
         results = search_activities.invoke({
-            "destination": dest,
-            "start_date": start,
-            "end_date": end
+            "destination": state["destination"],
+            "start_date": state["start_date"],
+            "end_date": state["end_date"]
         })
-        return {"activities": results, "error": state.get("error")}
+        return {"raw_activities": results} # Salva em raw_activities
     except Exception as e:
         print(f"Erro ao chamar ferramenta de atividades: {e}")
-        error_msg = f"{current_error + '; ' if current_error else ''}Erro ao buscar atividades: {e}"
-        return {"activities": [], "error": error_msg}
-
-# --- REMOVEMOS A FUNÇÃO ANTIGA format_list_of_dicts ---
+        return {"raw_activities": [], "error": f"Erro ao buscar atividades: {e}"}
 
 
-# --- MUDANÇA PRINCIPAL: O NOVO AGENTE CURADOR/INTEGRADOR ---
+# --- NÓ CURADOR (TOTALMENTE REFEITO) ---
 def curate_and_report_node(state: TravelAppState) -> dict:
-    print("--- 🧠 Agente Curador: Analisando e selecionando os melhores resultados ---")
+    print("--- 🧠 Agente Curador: Selecionando recomendações e gerando JSON ---")
 
     initial_error = state.get("error")
     
@@ -225,9 +211,9 @@ def curate_and_report_node(state: TravelAppState) -> dict:
             return []
         return [item for item in results if item.get("id") != "error"]
 
-    found_flights = filter_errors(state.get("flights"))
-    found_hotels = filter_errors(state.get("hotels"))
-    found_activities = filter_errors(state.get("activities"))
+    found_flights = filter_errors(state.get("raw_flights"))
+    found_hotels = filter_errors(state.get("raw_hotels"))
+    found_activities = filter_errors(state.get("raw_activities"))
 
     # Converte os resultados limpos para JSON para enviar ao LLM
     flights_json = json.dumps(found_flights, indent=2, ensure_ascii=False)
@@ -238,15 +224,13 @@ def curate_and_report_node(state: TravelAppState) -> dict:
     if initial_error and not found_flights and not found_hotels and not found_activities:
          print(f"Retornando erro inicial: {initial_error}")
          return {
-            "itinerary": f"Erro no planejamento: {initial_error}\nPor favor, tente refazer a busca com mais detalhes.",
-            "flights": [], "hotels": [], "activities": [],
-            "origin": state.get("origin"), "destination": state.get("destination"),
-            "start_date": state.get("start_date"), "end_date": state.get("end_date"),
+            "final_report": None,
             "error": initial_error
          }
 
-    # <<< INÍCIO DA MUDANÇA (PROMPT ATUALIZADO) >>>
-    # Este é o novo prompt "inteligente" ATUALIZADO
+    # Define o parser de saída para o nosso novo modelo FinalReport
+    parser = PydanticOutputParser(pydantic_object=FinalReport)
+
     summary_prompt = f"""
     Você é um agente de viagens especialista e seu trabalho é criar um "Relatório de Recomendações"
     para um usuário. Você recebeu dados brutos de ferramentas de busca e agora deve analisá-los,
@@ -256,58 +240,42 @@ def curate_and_report_node(state: TravelAppState) -> dict:
     "{state['user_request']}"
 
     Informações da Viagem:
-    Origem: {state.get('origin', 'Não extraída')}
     Destino: {state.get('destination', 'Não extraído')}
     Período: {state.get('start_date', 'Não extraído')} a {state.get('end_date', 'Não extraído')}
 
     --- DADOS BRUTOS DAS FERRAMENTAS ---
+    Voos: {flights_json}
+    Hotéis: {hotels_json}
+    Atividades: {activities_json}
 
-    Opções de Voos Encontradas:
-    {flights_json}
-
-    Opções de Hotéis Encontradas:
-    {hotels_json}
-
-    Opções de Atividades Encontradas:
-    {activities_json}
-
-    --- SEU RELATÓRIO DE RECOMENDAÇÃO ---
-
-    Sua tarefa é gerar um relatório em Markdown (use #, ##, * e -) que:
-    1.  Comece com uma saudação amigável e um resumo da viagem.
-    2.  Analise as listas JSON acima.
-    3.  Selecione as **melhores 1-2 opções de voos**. Justifique (ex: "Melhor rota").
-        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Companhia Aérea: Preço](link_do_id) - Justificativa.`
-    4.  Selecione as **melhores 3 opções de hotéis**. Justifique (ex: "Ótima localização").
-        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Nome do Hotel: Preço](link_do_id) - Justificativa.`
-    5.  Selecione as **melhores 4-5 atividades** para criar um roteiro variado. Justifique (ex: "Imperdível").
-        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Nome da Atividade](link_do_id) - Justificativa.`
-    6.  Se alguma categoria não tiver resultados (lista vazia), informe ao usuário amigavelmente (ex: "Não encontrei voos para este período, mas veja os hotéis...").
-    7.  Termine com uma frase de encerramento.
-
-    O foco é na **QUALIDADE** da seleção, não na quantidade. Pense como um agente de viagens real.
-
-    Comece o relatório:
+    --- SUA TAREFA ---
+    Analise as listas JSON acima. Selecione as MELHORES opções (1-2 voos, 2-3 hotéis, 4-5 atividades)
+    e justifique cada escolha (1-2 frases).
+    
+    Se uma lista estiver vazia, retorne uma lista vazia para ela (ex: "curated_flights": []).
+    
+    Gere um objeto JSON que siga estritamente o formato abaixo.
+    {parser.get_format_instructions()}
     """
-    # <<< FIM DA MUDANÇA (PROMPT ATUALIZADO) >>>
 
-    print("--- 🤖 Gerando relatório de recomendações com o Gemini... ---")
+    print("--- 🤖 Gerando relatório JSON curado com o Gemini... ---")
 
-    chain = llm | StrOutputParser()
-    report = chain.invoke(summary_prompt)
+    chain = llm | parser
 
-    # Retorna o relatório (itinerary) e TAMBÉM as listas filtradas
-    return {
-        "itinerary": report,
-        "flights": found_flights,
-        "hotels": found_hotels,
-        "activities": found_activities,
-        "origin": state.get("origin"),
-        "destination": state.get("destination"),
-        "start_date": state.get("start_date"),
-        "end_date": state.get("end_date"),
-        "error": initial_error
-    }
+    try:
+        report: FinalReport = chain.invoke(summary_prompt)
+        
+        # Retorna o objeto Pydantic
+        return {
+            "final_report": report,
+            "error": initial_error # Mantém o erro inicial se houver, mas o relatório foi gerado
+        }
+    except Exception as e:
+        print(f"!!! Erro crítico ao gerar relatório JSON curado: {e}")
+        return {
+            "final_report": None,
+            "error": f"Erro do Agente Curador: {e}"
+        }
 
 
 # --- Definição do Grafo (ATUALIZADO) ---
@@ -317,37 +285,48 @@ workflow.add_node("extract_info", extract_info_node)
 workflow.add_node("flights", flight_agent_node)
 workflow.add_node("hotels", hotel_agent_node)
 workflow.add_node("activities", activity_agent_node)
-# Renomeamos o último nó para refletir sua nova função
 workflow.add_node("curate_and_report", curate_and_report_node) 
 
 workflow.set_entry_point("extract_info")
 workflow.add_edge("extract_info", "flights")
 workflow.add_edge("flights", "hotels")
 workflow.add_edge("hotels", "activities")
-# A borda final agora aponta para o novo nó curador
 workflow.add_edge("activities", "curate_and_report")
 workflow.add_edge("curate_and_report", END)
 
 app = workflow.compile()
 print("Gráfico compilado com sucesso.")
 
-# --- Execução __main__ (sem mudanças) ---
+# --- Execução __main__ (para teste) ---
 if __name__ == "__main__":
     print("\n--- Iniciando Planejamento da Viagem (Execução Direta) ---")
     user_input = "Planeje uma viagem de São Paulo para Curitiba de 2025-12-10 até 2025-12-17"
-    initial_state = TravelAppState( user_request= user_input, origin=None, destination= None, start_date= None, end_date= None, flights= None, hotels= None, activities= None, itinerary= "", error= None )
+    
+    # Estado inicial atualizado
+    initial_state = TravelAppState( 
+        user_request= user_input, 
+        origin=None, destination= None, 
+        start_date= None, end_date= None, 
+        raw_flights= None, raw_hotels= None, raw_activities= None, 
+        final_report= None, 
+        error= None 
+    )
+    
     try:
         final_response_state = app.invoke(initial_state)
         print("\n--- Planejamento Concluído! ---")
         print("\n" + "="*50)
-        print("             RELATÓRIO FINAL GERADO")
+        print("             RELATÓRIO FINAL GERADO (JSON)")
         print("="*50 + "\n")
-        print(final_response_state.get('itinerary', "Nenhum itinerário gerado."))
-        print("\n--- Dados Brutos (Filtrados) ---")
-        print("Voos:", final_response_state.get('flights'))
-        print("Hotéis:", final_response_state.get('hotels'))
-        print("Atividades:", final_response_state.get('activities'))
-        print("Erro:", final_response_state.get('error'))
+        
+        if final_response_state.get('final_report'):
+            # Converte o objeto Pydantic para um dict para impressão bonita
+            report_dict = final_response_state['final_report'].dict()
+            print(json.dumps(report_dict, indent=2, ensure_ascii=False))
+        else:
+            print("Nenhum relatório gerado.")
+            
+        print("\nErro:", final_response_state.get('error'))
         print("\n" + "="*50 + "\n")
     except Exception as e:
         print(f"\nErro durante a execução do gráfico: {e}")

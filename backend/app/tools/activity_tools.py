@@ -3,6 +3,7 @@ import os
 import requests
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
+from app.tools.image_tools import search_image # <-- IMPORTAR A NOVA FERRAMENTA
 
 # --- Helper de Coordenadas (Copiado do hotel_tools) ---
 def _get_city_coordinates(city_name: str, api_key: str) -> Optional[Dict[str, float]]:
@@ -41,19 +42,19 @@ def search_activities(destination: str, **kwargs) -> List[Dict]:
         API_KEY = os.environ["GEOAPIFY_API_KEY"]
     except KeyError:
         print("ERRO (Atividades): GEOAPIFY_API_KEY não configurada.")
-        return [{"id": "error", "title": "GEOAPIFY_API_KEY não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        return [{"id": "error", "title": "GEOAPIFY_API_KEY não configurada", "description": "", "duration": "", "price": "R$ 0", "capacity": "", "image_url": None}]
 
     # 1. Obter coordenadas da cidade
     coords = _get_city_coordinates(destination, API_KEY)
     if not coords:
-        return [{"id": "error", "title": f"Não foi possível encontrar coordenadas para {destination}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        return [{"id": "error", "title": f"Não foi possível encontrar coordenadas para {destination}", "description": "", "duration": "", "price": "R$ 0", "capacity": "", "image_url": None}]
 
     # 2. Buscar locais (atrações) perto dessas coordenadas
     PLACES_URL = "https://api.geoapify.com/v2/places"
     params = {
         "categories": "tourism.attraction,leisure.park,entertainment.museum,entertainment.zoo,commercial.shopping_mall,catering.restaurant",
         "filter": f"circle:{coords['lon']},{coords['lat']},15000", # Raio de 15km
-        "limit": 50, # Aumentado para 50 para dar mais opções ao Agente Curador
+        "limit": 10, # Reduzido para 10 para limitar chamadas de imagem
         "apiKey": API_KEY
     }
     
@@ -73,32 +74,31 @@ def search_activities(destination: str, **kwargs) -> List[Dict]:
         for res in results:
             props = res.get('properties', {})
             
-            # Monta um link de busca do Google
-            google_search_url = f"https://www.google.com/search?q={props.get('name', 'atividade').replace(' ', '+')}+{destination.replace(' ', '+')}"
-            
-            # Tenta pegar uma descrição, se não houver, usa o endereço
+            activity_name = props.get('name', 'Atração não identificada')
+            google_search_url = f"https://www.google.com/search?q={activity_name.replace(' ', '+')}+{destination.replace(' ', '+')}"
             description = props.get('address_line2', 'Atração local')
-            
-            # Pega a categoria principal para usar como "Fonte"
-            category = props.get('categories', ['tourism'])[0].split('.')[0] # ex: "tourism" ou "leisure"
+            category = props.get('categories', ['tourism'])[0].split('.')[0]
+
+            # --- NOVA ADIÇÃO: BUSCAR IMAGEM ---
+            image_url = search_image.invoke({"query": f"{activity_name} {destination}"})
+            # ------------------------------------
 
             formatted_results.append({
-                "id": google_search_url, # Usa o URL do Google como ID/link
-                "title": props.get('name', 'Atração não identificada'),
+                "id": google_search_url, 
+                "title": activity_name,
                 "description": description,
-                "duration": "N/A", # Atrações não têm duração fixa
+                "duration": "N/A",
                 "price": "Verificar no site",
-                "capacity": category.capitalize() # Fonte (ex: "Tourism", "Leisure")
+                "capacity": category.capitalize(),
+                "image_url": image_url # <-- ANEXAR A IMAGEM
             })
         
-        print(f"Retornando {len(formatted_results)} opções de atividade da Geoapify.")
+        print(f"Retornando {len(formatted_results)} opções de atividade da Geoapify (com imagens).")
         return formatted_results
 
     except requests.exceptions.HTTPError as e:
-        # Erro HTTP (como o 400 Bad Request)
         print(f"!!! Erro na API Geoapify (Atividades): {e.response.text}")
-        return [{"id": "error", "title": f"Erro na API de atividades: {e.response.text}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        return [{"id": "error", "title": f"Erro na API de atividades: {e.response.text}", "description": "", "duration": "", "price": "R$ 0", "capacity": "", "image_url": None}]
     except Exception as e:
-        # Outros erros (ex: timeout, parsing de JSON)
         print(f"!!! Erro inesperado (Atividades - Geoapify): {e}")
-        return [{"id": "error", "title": f"Erro ao buscar atividades: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": ""}]
+        return [{"id": "error", "title": f"Erro ao buscar atividades: {e}", "description": "", "duration": "", "price": "R$ 0", "capacity": "", "image_url": None}]

@@ -1,61 +1,62 @@
-// As props dos cards agora são diferentes.
-// Vamos criar interfaces simples para os resultados da busca.
+// --- DEFINIÇÕES DOS DADOS BRUTOS (com image_url) ---
 
-interface WebSearchResult {
-  id: string;       // No nosso caso, esta será a URL
-  title: string;    // O título da página
-  description: string; // O snippet da busca
-  source: string;   // O domínio (ex: tripadvisor.com)
-  price: string;    // O texto (ex: "Verificar no site")
-}
-
-// Mapeamos as props dos cards para esta nova interface genérica
-// (Note que os nomes das props nos cards antigos não batem 100% com os da Tavily,
-// por isso adaptamos no backend e aqui)
-
-// Para FlightCard
 export interface ApiFlight {
-  id: string;       // url
-  airline: string;  // source (ex: skyscanner.com)
-  departure: string; // "N/A"
-  arrival: string;   // "N/A"
-  duration: string;  // title
-  price: string;     // "Verificar no site"
-  stops: number;     // 0
+  id: string;       
+  airline: string;  
+  departure: string;
+  arrival: string;  
+  duration: string; 
+  price: string;    
+  stops: number;    
+  image_url: string | null; // <-- NOVO
 }
 
-// Para HotelCard
 export interface ApiHotel {
-  id: string;       // url
-  name: string;     // title
-  location: string; // source
-  rating: number;   // 0
-  price: string;    // "Verificar no site"
-  amenities: string[]; // [description]
+  id: string;       
+  name: string;     
+  location: string; 
+  rating: number;   
+  price: string;    
+  amenities: string[];
+  image_url: string | null; // <-- NOVO
 }
 
-// Para ActivityCard
 export interface ApiActivity {
-  id: string;         // url
-  title: string;      // title
-  description: string; // description
-  duration: string;   // "N/A"
-  price: string;      // "Verificar no site"
-  capacity: string;   // source
+  id: string;         
+  title: string;      
+  description: string;
+  duration: string;   
+  price: string;      
+  capacity: string;   
+  image_url: string | null; // <-- NOVO
 }
 
+// --- DEFINIÇÕES DO NOVO RELATÓRIO CURADO ---
+
+export interface CuratedRecommendation<T> {
+  data: T; // T será ApiFlight, ApiHotel, ou ApiActivity
+  justification: string;
+}
+
+export interface FinalReport {
+  summary_text: string;
+  curated_flights: CuratedRecommendation<ApiFlight>[];
+  curated_hotels: CuratedRecommendation<ApiHotel>[];
+  curated_activities: CuratedRecommendation<ApiActivity>[];
+  closing_text: string;
+}
+
+// --- A RESPOSTA FINAL DA API ---
 
 export interface TripDataResponse {
-  flights: ApiFlight[] | null;
-  hotels: ApiHotel[] | null;
-  activities: ApiActivity[] | null;
-  itinerary: string;
+  final_report: FinalReport | null;
   destination: string | null;
   start_date: string | null;
   end_date: string | null;
   error: string | null;
 }
 
+// A função de fetch permanece a MESMA
 export const planTrip = async (user_request: string): Promise<TripDataResponse> => {
   const response = await fetch("http://127.0.0.1:8000/plan-trip", {
     method: "POST",

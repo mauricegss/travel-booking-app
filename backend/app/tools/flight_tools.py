@@ -6,6 +6,7 @@ from pydantic.v1 import BaseModel, Field
 from serpapi import GoogleSearch
 from tavily import TavilyClient
 from functools import lru_cache
+from app.tools.image_tools import search_image # <-- IMPORTAR FERRAMENTA DE IMAGEM
 
 # --- O Helper de IATA (Tavily) ---
 @lru_cache(maxsize=100)
@@ -53,7 +54,7 @@ class FlightSearchInput(BaseModel):
 
 @tool(args_schema=FlightSearchInput)
 def search_flights(origin: str, destination: str, departure_date: str, **kwargs) -> List[Dict]:
-    """Busca por voos usando a API Google Flights da SerpAPI."""
+    """Busca por voos usando a API Google Flights da SerpAPI e anexa uma imagem da companhia."""
     print(f"Tool: Buscando voos REAIS (SerpAPI Google Flights) de {origin} para {destination}...")
     
     return_date = kwargs.get('return_date')
@@ -66,15 +67,15 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
             
     except KeyError as e:
         error_msg = f"{e.args[0]} não configurada."
-        return [{"id": "error", "airline": error_msg, "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        return [{"id": "error", "airline": error_msg, "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
 
     origin_iata = _get_iata_code(origin)
     dest_iata = _get_iata_code(destination)
 
     if not origin_iata:
-        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
     if not dest_iata:
-        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
 
     params = {
         "engine": "google_flights",
@@ -98,7 +99,7 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
         if "error" in results:
             error_msg = results["error"]
             print(f"!!! Erro da SerpAPI (Voos): {error_msg}")
-            return [{"id": "error", "airline": f"Erro na API de voos: {error_msg}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+            return [{"id": "error", "airline": f"Erro na API de voos: {error_msg}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
 
         formatted_results = []
         data_to_parse = results.get("best_flights", [])
@@ -113,36 +114,37 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
         for flight in data_to_parse:
             legs = flight.get("flights", [])
             if not legs:
-                continue # Pula este resultado de voo se não tiver trechos
+                continue 
 
             outbound_leg = legs[0]
             departure_time = outbound_leg.get("departure_airport", {}).get("time", "N/A")
             arrival_time = outbound_leg.get("arrival_airport", {}).get("time", "N/A")
+            airline_name = flight.get("airline_logo_text", outbound_leg.get("airline", "N/A"))
 
-            # --- [INÍCIO DA MUDANÇA] ---
-            # Se for uma viagem de ida E VOLTA, formatamos os dados de forma diferente
             if return_date and len(legs) > 1:
                 return_leg = legs[1]
-                
-                # Sobrescrevemos as variáveis para refletir a viagem completa
-                departure_time = f"Ida: {departure_time}" # Ex: "Ida: 09:55"
-                # Usamos a partida do voo de volta como "chegada" (horário de retorno)
-                arrival_time = f"Volta: {return_leg.get('departure_airport', {}).get('time', 'N/A')}" # Ex: "Volta: 18:00"
-            # --- [FIM DA MUDANÇA] ---
+                departure_time = f"Ida: {departure_time}"
+                arrival_time = f"Volta: {return_leg.get('departure_airport', {}).get('time', 'N/A')}"
+            
+            # --- NOVA ADIÇÃO: BUSCAR IMAGEM DA COMPANHIA ---
+            # (Usamos o nome da companhia + "logo" para melhores resultados)
+            image_url = search_image.invoke({"query": f"{airline_name} logo"})
+            # ----------------------------------------------
 
             formatted_results.append({
                 "id": flight.get("google_flights_url", "default_id"),
-                "airline": flight.get("airline_logo_text", outbound_leg.get("airline", "N/A")),
-                "departure": departure_time, # <-- Agora contém "Ida: ..."
-                "arrival": arrival_time,     # <-- Agora contém "Volta: ..."
-                "duration": flight.get("total_duration", "N/A"), # Duração total (ida+volta)
+                "airline": airline_name,
+                "departure": departure_time,
+                "arrival": arrival_time,
+                "duration": flight.get("total_duration", "N/A"),
                 "price": f"R$ {flight.get('price', 0)}", 
-                "stops": flight.get("stops", 0)
+                "stops": flight.get("stops", 0),
+                "image_url": image_url # <-- ANEXAR A IMAGEM
             })
         
-        print(f"Retornando {len(formatted_results)} opções de voo da SerpAPI.")
+        print(f"Retornando {len(formatted_results)} opções de voo da SerpAPI (com imagens).")
         return formatted_results[:10]
 
     except Exception as e:
         print(f"Erro inesperado (Voos - SerpAPI): {e}")
-        return [{"id": "error", "airline": f"Erro ao buscar voos na SerpAPI: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0}]
+        return [{"id": "error", "airline": f"Erro ao buscar voos na SerpAPI: {e}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
