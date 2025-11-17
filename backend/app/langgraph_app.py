@@ -245,7 +245,8 @@ def curate_and_report_node(state: TravelAppState) -> dict:
             "error": initial_error
          }
 
-    # Este é o novo prompt "inteligente"
+    # <<< INÍCIO DA MUDANÇA (PROMPT ATUALIZADO) >>>
+    # Este é o novo prompt "inteligente" ATUALIZADO
     summary_prompt = f"""
     Você é um agente de viagens especialista e seu trabalho é criar um "Relatório de Recomendações"
     para um usuário. Você recebeu dados brutos de ferramentas de busca e agora deve analisá-los,
@@ -275,9 +276,12 @@ def curate_and_report_node(state: TravelAppState) -> dict:
     Sua tarefa é gerar um relatório em Markdown (use #, ##, * e -) que:
     1.  Comece com uma saudação amigável e um resumo da viagem.
     2.  Analise as listas JSON acima.
-    3.  Selecione as **melhores 1-2 opções de voos**. Justifique (ex: "Melhor rota", "Menos paradas").
-    4.  Selecione as **melhores 3 opções de hotéis**. Justifique (ex: "Ótima localização", "Bom custo-benefício").
-    5.  Selecione as **melhores 4-5 atividades** para criar um roteiro variado. Justifique (ex: "Imperdível em Curitiba", "Bom para um dia chuvoso").
+    3.  Selecione as **melhores 1-2 opções de voos**. Justifique (ex: "Melhor rota").
+        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Companhia Aérea: Preço](link_do_id) - Justificativa.`
+    4.  Selecione as **melhores 3 opções de hotéis**. Justifique (ex: "Ótima localização").
+        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Nome do Hotel: Preço](link_do_id) - Justificativa.`
+    5.  Selecione as **melhores 4-5 atividades** para criar um roteiro variado. Justifique (ex: "Imperdível").
+        **Formate a recomendação como um link clicável usando o campo 'id'**: `* [Nome da Atividade](link_do_id) - Justificativa.`
     6.  Se alguma categoria não tiver resultados (lista vazia), informe ao usuário amigavelmente (ex: "Não encontrei voos para este período, mas veja os hotéis...").
     7.  Termine com uma frase de encerramento.
 
@@ -285,6 +289,7 @@ def curate_and_report_node(state: TravelAppState) -> dict:
 
     Comece o relatório:
     """
+    # <<< FIM DA MUDANÇA (PROMPT ATUALIZADO) >>>
 
     print("--- 🤖 Gerando relatório de recomendações com o Gemini... ---")
 
