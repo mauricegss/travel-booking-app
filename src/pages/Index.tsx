@@ -1,79 +1,58 @@
-import { Plane, Hotel, MapPinned, Sparkles } from "lucide-react";
 import { SearchBar } from "@/components/SearchBar";
-import { AgentCard } from "@/components/AgentCard";
 import heroImage from "@/assets/hero-beach.jpg";
+import { Button } from "@/components/ui/button";
+import { LogOut, FileText } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const Index = () => {
-  const agents = [
-    {
-      icon: Plane,
-      title: "Busca de Voos",
-      description: "Consulta APIs e otimiza resultados baseados nas suas preferências." 
-    },
-    {
-      icon: Hotel,
-      title: "Hospedagem",
-      description: "Conecta-se a APIs de hotéis e aplica filtros de busca." 
-    },
-    {
-      icon: MapPinned,
-      title: "Atividades Locais",
-      description: "Recomenda atrações e experiências baseadas no seu perfil e destino." 
-    },
-    {
-      icon: Sparkles,
-      title: "Integração e Reserva",
-      description: "Combina informações e oferece um relatório simplificado." 
-    }
-  ];
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem("token");
+    navigate("/");
+  };
 
   return (
     <div 
-      className="min-h-screen bg-cover bg-center bg-fixed flex flex-col justify-center items-center p-4 relative" 
+      className="min-h-screen bg-cover bg-center bg-fixed flex flex-col p-4 relative" 
       style={{ backgroundImage: `url(${heroImage})` }}
     >
-      {/* Overlay semitransparente */}
+      {/* Overlay */}
       <div className="absolute inset-0 bg-black/50 z-0"></div>
 
-      {/* Container principal */}
-      <div className="relative z-10 container mx-auto flex flex-col items-center gap-8 md:gap-12 w-full"> 
+      {/* Navbar Simplificada */}
+      <div className="relative z-20 w-full max-w-6xl mx-auto flex justify-end items-center py-6 gap-4">
+        <Button 
+          onClick={() => navigate("/my-reports")}
+          variant="secondary"
+          className="bg-white/20 backdrop-blur-sm text-white border border-white/30 hover:bg-white/30"
+        >
+          <FileText className="mr-2 h-4 w-4" /> Meus Relatórios
+        </Button>
+        <Button 
+          onClick={handleLogout}
+          variant="destructive"
+          className="backdrop-blur-sm shadow-lg"
+        >
+          <LogOut className="mr-2 h-4 w-4" /> Sair
+        </Button>
+      </div>
+
+      {/* Conteúdo Central */}
+      <div className="relative z-10 flex-1 flex flex-col justify-center items-center w-full max-w-4xl mx-auto -mt-20"> 
         
-        {/* Conteúdo da Hero Section */}
-        <div className="text-center text-white pt-16 md:pt-24">
+        <div className="text-center text-white mb-12">
           <h1 className="text-4xl md:text-6xl font-bold mb-4 drop-shadow-2xl">
-            Planeje sua viagem dos sonhos
+            Para onde vamos?
           </h1>
-          <p className="text-lg md:text-xl text-white/95 mb-8 max-w-3xl mx-auto drop-shadow-lg">
-            Agentes de IA trabalham para encontrar as melhores opções personalizadas para você
+          <p className="text-xl text-white/90 drop-shadow-lg max-w-2xl mx-auto">
+            Diga-nos o destino e as datas, e nós cuidaremos do resto.
           </p>
-          <SearchBar /> 
         </div>
 
-        {/* Agents Section */}
-        <section className="w-full max-w-6xl pb-16 md:pb-24">
-          <div className="text-center mb-10 text-white">
-            <h2 className="text-3xl md:text-4xl font-bold mb-3 drop-shadow-lg">
-              Agentes Inteligentes
-            </h2>
-            <p className="text-lg text-white/90 max-w-2xl mx-auto drop-shadow-lg">
-              Nossa IA especializada cuida de cada detalhe da sua viagem
-            </p>
-          </div>
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"> 
-            {agents.map((agent, index) => (
-              // --- [INÍCIO DA MUDANÇA] ---
-              // Aplicando o estilo de "vidro fosco" completo aqui
-              <div 
-                key={index} 
-                className="bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20"
-              > 
-              {/* --- [FIM DA MUDANÇA] --- */}
-                <AgentCard {...agent} />
-              </div>
-            ))}
-          </div>
-        </section>
+        <div className="w-full">
+          <SearchBar />
+        </div>
 
       </div>
     </div>
