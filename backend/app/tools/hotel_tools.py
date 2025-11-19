@@ -30,6 +30,7 @@ def search_hotels(destination: str, check_in_date: str, check_out_date: str) -> 
         "q": f"hotéis em {destination}",
         "check_in_date": check_in_date,
         "check_out_date": check_out_date,
+        "adults": 1, # <-- ATUALIZADO: Define busca para 1 pessoa
         "currency": "BRL",
         "hl": "pt-br",
         "gl": "br"
@@ -55,10 +56,23 @@ def search_hotels(destination: str, check_in_date: str, check_out_date: str) -> 
         for hotel in data_to_parse[:7]: 
             
             hotel_link = hotel.get("link", f"https://www.google.com/search?q={hotel.get('name', 'hotel').replace(' ', '+')}+{destination.replace(' ', '+')}")
-            price_str = hotel.get("price", "Verificar no site")
             
-            if "total" in price_str:
-                 price_str = price_str.split("total")[0].strip()
+            # --- LÓGICA DE PREÇO ATUALIZADA ---
+            # Tenta pegar do campo estruturado rate_per_night -> lowest
+            rate_info = hotel.get("rate_per_night", {})
+            price_str = rate_info.get("lowest")
+            
+            # Se não achar, tenta pegar o preço total
+            if not price_str:
+                total_rate = hotel.get("total_rate", {})
+                price_str = total_rate.get("lowest")
+
+            # Fallback final para lógica antiga se ainda for None
+            if not price_str:
+                price_str = hotel.get("price", "Verificar no site")
+                if "total" in price_str:
+                     price_str = price_str.split("total")[0].strip()
+            # ----------------------------------
 
             amenities_list = hotel.get("highlights", []) 
             if not amenities_list and hotel.get("description"):
