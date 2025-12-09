@@ -1,98 +1,126 @@
-# Travel Booking App - Agente de Viagens com IA
+# Como Instalar e Usar o Travel Booking App
 
-Este é um aplicativo full-stack de planejamento de viagens que utiliza um sistema de agentes de IA, construído com **LangGraph** e o modelo **Gemini** do Google, para pesquisar e montar um roteiro de viagem coeso.
+Bem-vindo ao guia de iniciação do **Travel Booking App**. Este tutorial foi desenhado para te ajudar a configurar e explorar o nosso agente de viagens inteligente de forma rápida e simples.
 
-O frontend é uma interface moderna construída com **React**, **Vite**, **TypeScript** e **shadcn-ui**. O backend é um servidor **FastAPI** em Python que orquestra os agentes de IA.
+## 1. Introdução
 
-## 🤖 Conceito: Como Funciona
+### O que é o Travel Booking App?
+O Travel Booking App é uma aplicação *full-stack* de planejamento de viagens que utiliza um sistema de agentes de IA, construído com **LangGraph** e o modelo **Gemini** do Google.
 
-O diferencial deste projeto é o **Agente Curador** no backend. Em vez de simplesmente despejar os resultados da API no frontend, o sistema segue um fluxo inteligente:
+Imagine-o como uma **"Agência de Viagens Digital"** completa. Diferente de sites de busca comuns, este sistema possui um **Agente Curador** que não apenas pesquisa, mas seleciona e justifica as melhores opções para ti, criando um roteiro coeso com imagens reais dos locais.
 
-1.  **Frontend (React):** O usuário insere a Origem, Destino e Datas na `SearchBar`.
-2.  **Backend (FastAPI):** O frontend envia uma *única string* de linguagem natural (ex: "Planeje uma viagem de São Paulo para Curitiba...") para o endpoint `/plan-trip`.
-3.  **Backend (LangGraph):** O servidor FastAPI aciona um grafo LangGraph (`app.py`) que orquestra vários agentes:
-    * **Agente Extrator:** Um LLM (Gemini) primeiro extrai as entidades estruturadas (origem, destino, datas) da string.
-    * **Agentes de Ferramentas:** O grafo chama as ferramentas de busca com os dados extraídos:
-        * `search_flights`: Busca voos usando **AviationStack** e **Tavily** (para códigos IATA).
-        * `Google Hotels`: Busca hotéis usando **Geoapify**.
-        * `search_activities`: Busca atividades e pontos turísticos usando **Geoapify**.
-    * **Agente Curador (O Cérebro):** Um nó final do LangGraph (`curate_and_report_node`) recebe *todos* os dados brutos em JSON das ferramentas. Ele então usa o Gemini com um prompt detalhado para atuar como um "agente de viagens especialista", selecionando as **melhores 1-2 opções de voos**, **3 hotéis** e **4-5 atividades**, escrevendo um relatório coeso e justificado em Markdown.
-4.  **Resultado (React):** O frontend recebe o relatório final em Markdown e os dados filtrados, exibindo-os na página de resultados (`SearchResults.tsx`).
+### Para que serve?
+Podes conversar com ele para:
+* **Planejar roteiros complexos:** Definir voos, hotéis e atividades com uma única frase em linguagem natural.
+* **Busca em Tempo Real:** O sistema consulta dados reais de preços e horários usando o Google Flights e Google Hotels (via SerpAPI).
+* **Obter recomendações visuais:** O relatório final inclui fotos dos hotéis, companhias aéreas e atrações turísticas.
 
-## 🛠️ Tecnologias Utilizadas
+## 2. Pré-requisitos
 
-| Área | Tecnologia | Propósito |
-| :--- | :--- | :--- |
-| **Frontend** | React | Biblioteca principal da UI. |
-| | Vite | Build tool e servidor de desenvolvimento. |
-| | TypeScript | Tipagem estática. |
-| | Tailwind CSS | Estilização CSS. |
-| | shadcn-ui | Componentes de UI (Cards, Botões, etc.). |
-| | React Router | Roteamento de páginas (`/` e `/search-results`). |
-| **Backend** | Python | Linguagem principal. |
-| | FastAPI | Servidor web ASGI para a API. |
-| | LangGraph | Orquestração do fluxo de agentes (StateGraph). |
-| | LangChain | Integrações (`langchain-google-genai`). |
-| | Google Gemini | Modelo de LLM para extração e curadoria. |
-| **APIs** | Tavily | Busca web (usada para encontrar códigos IATA). |
-| | AviationStack | API de dados de voos (horários). |
-| | Geoapify | API de geocodificação e busca de locais (Hotéis, Atividades). |
+Antes de começarmos, garante que tens as seguintes ferramentas instaladas no teu computador:
 
-## 🚀 Configuração e Execução
+* **Node.js** (v18 ou superior) & **npm** (para o Frontend).
+* **Python** (v3.10 ou superior) & **pip** (para o Backend).
+* **Chaves de API** (necessárias para os serviços de busca). Precisarás das seguintes:
+    * **Google API Key** (para o cérebro do modelo Gemini).
+    * **Tavily API Key** (para descobrir códigos de aeroportos IATA).
+    * **SerpAPI Key** (para buscar dados reais de Voos e Hotéis no Google).
+    * **Geoapify API Key** (para buscar Atividades e Atrações Turísticas).
 
-### 1. Pré-requisitos
+## 3. Instalação Rápida
 
-* Node.js (v18+) e npm
-* Python (v3.10+) e pip
-* Chaves de API para:
-    * Google (Gemini)
-    * Tavily
-    * AviationStack
-    * Geoapify
+O sistema está dividido em duas partes: o **Backend** (API Python com LangGraph) e o **Frontend** (Interface React). Vamos configurar ambos.
 
-### 2. Backend (FastAPI + LangGraph)
+### Passo A: Configurar o Backend (API)
 
-Primeiro, configure e inicie o servidor de backend.
+1.  Abre o teu terminal e entra na pasta do backend:
+    ```bash
+    cd backend
+    ```
+
+2.  Cria um ambiente virtual para isolar as dependências (recomendado):
+    ```bash
+    python -m venv venv
+    # No Windows, ativa com: .\venv\Scripts\activate
+    # No Linux/Mac, ativa com: source venv/bin/activate
+    ```
+
+3.  Instala as bibliotecas necessárias:
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+4.  **Configura as tuas Chaves de API:**
+    Cria um ficheiro chamado `.env` dentro da pasta `backend` e preenche com as chaves corretas:
+
+    **Exemplo (.env)**
+    ```ini
+    GOOGLE_API_KEY="SUA_CHAVE_AQUI"
+    TAVILY_API_KEY="SUA_CHAVE_AQUI"
+    SERPAPI_API_KEY="SUA_CHAVE_AQUI"
+    GEOAPIFY_API_KEY="SUA_CHAVE_AQUI"
+    ```
+
+### Passo B: Configurar o Frontend (Interface)
+
+1.  Abre um novo terminal e volta à raiz do projeto (se estiveres na pasta `backend`, recua uma vez):
+    ```bash
+    cd ..
+    ```
+
+2.  Instala as dependências da interface visual:
+    ```bash
+    npm install
+    ```
+
+## 4. Como Usar
+
+Agora vamos colocar tudo a funcionar!
+
+### 1. Iniciar o Servidor (Backend):
+No terminal do Backend (com o ambiente virtual ativo), inicia o servidor FastAPI.
 
 ```bash
-# 1. Navegue até a pasta do backend
-cd backend
-
-# 2. Crie um ambiente virtual e ative-o
-python -m venv venv
-source venv/bin/activate  # No Windows: .\venv\Scripts\activate
-
-# 3. Instale as dependências
-pip install -r requirements.txt
-
-# 4. Configure as variáveis de ambiente
-# Copie o arquivo de exemplo
-cp .env.example .env
-
-# Edite o arquivo .env e adicione suas chaves de API
-# GOOGLE_API_KEY=...
-# TAVILY_API_KEY=...
-# AVIATIONSTACK_API_KEY=...
-# GEOAPIFY_API_KEY=...
-
-# 5. Inicie o servidor FastAPI
-# O frontend espera que ele rode na porta 8000
 uvicorn app.main:api --host 127.0.0.1 --port 8000 --reload
+
 ```
 
-### 3. Frontend (React + Vite)
+### 2. Iniciar a Interface (Frontend):
 
-Em um novo terminal, configure e inicie o frontend.
+No terminal do Frontend, executa o servidor de desenvolvimento:
 
-```bash
-# 1. Volte para o diretório raiz (se estiver em /backend)
-cd ..
+Bash
 
-# 2. Instale as dependências do Node.js
-npm install
-
-# 3. Inicie o servidor de desenvolvimento do Vite
+```
 npm run dev
+
 ```
 
-Abra seu navegador em http://localhost:8080 (ou qualquer porta que o Vite indicar) para ver o aplicativo em execução.
+O terminal irá mostrar um endereço local, geralmente `http://localhost:8080`.
+
+### 3. Interagir:
+
+-   Abre o teu navegador e vai ao endereço indicado.
+    
+-   Na barra de pesquisa, experimenta fazer um pedido completo:
+    
+    > _"Planeje uma viagem de Lisboa para Paris de 15/09/2025 a 20/09/2025"_
+    
+
+O sistema irá processar o pedido, buscar voos e hotéis no Google, atividades locais e exibir um relatório detalhado com fotos.
+
+----------
+
+**Dica Pro:** O Travel Booking App segue um fluxo de pensamento inteligente (**LangGraph**):
+
+1.  **Extração:** Identifica datas e locais.
+    
+2.  **Ferramentas:**
+    
+    -   Usa **Tavily** para achar o código IATA (ex: "LIS" para Lisboa).
+        
+    -   Usa **SerpAPI** para varrer o Google Flights e Google Hotels.
+        
+    -   Usa **Geoapify** para encontrar parques e museus próximos.
+        
+3.  **Curadoria:** O Gemini lê os JSONs brutos, escolhe as melhores opções (baseado em preço e avaliação) e gera o relatório final.
