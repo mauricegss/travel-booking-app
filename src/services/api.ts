@@ -9,6 +9,7 @@ export interface ApiFlight {
   price: string;    
   stops: number;    
   image_url: string | null;
+  fallback_note?: string | null;
 }
 
 export interface ApiHotel {

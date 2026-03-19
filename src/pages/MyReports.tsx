@@ -60,7 +60,7 @@ const MyReports = () => {
         end_date: report.end_date,
         error: null
     };
-    navigate("/search-results", { state: { apiResponse } });
+    navigate("/home", { state: { apiResponse } });
   };
 
   return (
@@ -106,62 +106,74 @@ const MyReports = () => {
         )}
 
         {/* Grid de Relatórios */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid gap-8 md:grid-cols-2 lg:grid-cols-3">
             {reports.map((report) => (
             <Card 
                 key={report.id} 
-                className="group bg-white/10 backdrop-blur-md border-white/20 text-white overflow-hidden transition-all duration-300 hover:scale-[1.02] hover:shadow-2xl hover:bg-white/15"
+                className="group relative bg-white/5 hover:bg-white/10 backdrop-blur-xl border-white/10 text-white overflow-hidden transition-all duration-300 hover:-translate-y-2 hover:shadow-[0_20px_50px_rgba(0,0,0,0.5)] flex flex-col justify-between"
             >
-                <CardHeader className="pb-3">
-                    <div className="flex justify-between items-start">
-                        <div className="bg-blue-500/20 p-2 rounded-lg mb-2 w-fit">
-                             <MapPin className="h-6 w-6 text-blue-200" />
+                {/* Glow de fundo */}
+                <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/20 rounded-full blur-3xl -mr-10 -mt-10 pointer-events-none transition-opacity opacity-40 group-hover:opacity-100"></div>
+
+                <CardHeader className="pb-4 relative z-10">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="bg-gradient-to-br from-white/10 to-white/5 p-3 rounded-xl border border-white/10 shadow-inner group-hover:ring-2 ring-blue-400/30 transition-all">
+                             <MapPin className="h-6 w-6 text-blue-300 drop-shadow-sm" />
                         </div>
                         {/* Botão de Deletar com Confirmação */}
                         <AlertDialog>
                             <AlertDialogTrigger asChild>
-                                <Button variant="ghost" size="icon" className="text-white/50 hover:text-red-400 hover:bg-red-500/20 -mr-2 -mt-2">
+                                <Button variant="ghost" size="icon" className="text-white/40 hover:text-red-400 hover:bg-red-500/20 -mr-2 -mt-2 transition-colors">
                                     <Trash2 className="h-5 w-5" />
                                 </Button>
                             </AlertDialogTrigger>
-                            <AlertDialogContent className="bg-slate-900 border-slate-700 text-white">
+                            <AlertDialogContent className="bg-slate-900 border-slate-700 text-white rounded-2xl">
                                 <AlertDialogHeader>
-                                    <AlertDialogTitle>Tem certeza?</AlertDialogTitle>
+                                    <AlertDialogTitle className="text-xl">Excluir Relatório?</AlertDialogTitle>
                                     <AlertDialogDescription className="text-slate-400">
-                                        Esta ação não pode ser desfeita. O relatório será permanentemente excluído.
+                                        Esta ação não pode ser desfeita.
                                     </AlertDialogDescription>
                                 </AlertDialogHeader>
-                                <AlertDialogFooter>
-                                    <AlertDialogCancel className="bg-transparent border-slate-600 text-white hover:bg-slate-800">Cancelar</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleDelete(report.id)} className="bg-red-600 hover:bg-red-700 border-none">
+                                <AlertDialogFooter className="mt-4">
+                                    <AlertDialogCancel className="bg-transparent border-slate-600 text-white hover:bg-slate-800 rounded-lg">Cancelar</AlertDialogCancel>
+                                    <AlertDialogAction onClick={() => handleDelete(report.id)} className="bg-red-600 hover:bg-red-700 border-none rounded-lg font-bold">
                                         Excluir
                                     </AlertDialogAction>
                                 </AlertDialogFooter>
                             </AlertDialogContent>
                         </AlertDialog>
                     </div>
-                    <CardTitle className="text-2xl font-bold truncate" title={report.destination}>
+                    <CardTitle className="text-2xl font-bold truncate tracking-tight" title={report.destination}>
                         {report.destination}
                     </CardTitle>
                 </CardHeader>
                 
-                <CardContent>
-                    <div className="flex items-center gap-2 text-white/80 mb-2">
-                        <CalendarDays className="h-4 w-4" />
-                        <span className="font-medium">Ida:</span> {report.start_date}
-                    </div>
-                    <div className="flex items-center gap-2 text-white/80">
-                        <CalendarDays className="h-4 w-4" />
-                        <span className="font-medium">Volta:</span> {report.end_date}
+                <CardContent className="relative z-10 flex-grow">
+                    <div className="flex flex-col gap-3 bg-black/20 p-4 rounded-xl border border-white/5">
+                        <div className="flex items-center gap-3 text-white/90">
+                            <CalendarDays className="h-4 w-4 text-white/50" />
+                            <div className="flex flex-col">
+                                <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold mb-[2px]">Ida</span>
+                                <span className="font-medium text-sm">{report.start_date}</span>
+                            </div>
+                        </div>
+                        <div className="h-[1px] w-full bg-white/10"></div>
+                        <div className="flex items-center gap-3 text-white/90">
+                            <CalendarDays className="h-4 w-4 text-white/50" />
+                            <div className="flex flex-col">
+                                <span className="text-[10px] uppercase tracking-wider text-white/50 font-semibold mb-[2px]">Volta</span>
+                                <span className="font-medium text-sm">{report.end_date}</span>
+                            </div>
+                        </div>
                     </div>
                 </CardContent>
 
-                <CardFooter>
+                <CardFooter className="pt-2 pb-6 px-6 relative z-10">
                     <Button 
-                        className="w-full bg-white/20 hover:bg-white/30 text-white border border-white/10 transition-colors group-hover:border-white/30"
+                        className="w-full bg-white text-black hover:bg-blue-50 font-bold transition-all shadow-lg hover:shadow-xl group-hover:scale-[1.03]"
                         onClick={() => handleView(report)}
                     >
-                        <Eye className="w-4 h-4 mr-2" /> Ver Detalhes
+                        <Eye className="w-4 h-4 mr-2" /> Reviver Viagem
                     </Button>
                 </CardFooter>
             </Card>

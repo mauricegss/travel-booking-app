@@ -2,7 +2,7 @@ import { Search, Calendar, MapPin, Loader2, PlaneTakeoff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { planTrip } from "@/services/api";
 import { useToast } from "@/hooks/use-toast";
 
@@ -14,6 +14,28 @@ export const SearchBar = () => {
   const [checkIn, setCheckIn] = useState("");
   const [checkOut, setCheckOut] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingText, setLoadingText] = useState("Iniciando busca...");
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isLoading) {
+      const messages = [
+        "Preparando as malas virtuais...",
+        "Buscando as melhores rotas e voos...",
+        "Analisando opções de hospedagem...",
+        "Explorando atividades incríveis pelo local...",
+        "Nosso agente curador está moldando seu roteiro...",
+        "Quase lá! Finalizando todos os detalhes mágicos..."
+      ];
+      let i = 0;
+      setLoadingText(messages[0]);
+      interval = setInterval(() => {
+        i = (i + 1) % messages.length;
+        setLoadingText(messages[i]);
+      }, 4000);
+    }
+    return () => clearInterval(interval);
+  }, [isLoading]);
 
   const handleSearch = async () => {
     // Validação
@@ -41,7 +63,7 @@ export const SearchBar = () => {
     try {
       const apiResponse = await planTrip(userRequest);
       navigate(
-        `/search-results?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&checkin=${checkIn}&checkout=${checkOut}`,
+        `/home?origin=${encodeURIComponent(origin)}&destination=${encodeURIComponent(destination)}&checkin=${checkIn}&checkout=${checkOut}`,
         { state: { apiResponse } }
       );
     } catch (error) {
@@ -57,8 +79,9 @@ export const SearchBar = () => {
   };
 
   return (
-    <div className="w-full max-w-5xl mx-auto bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 p-6">
-      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+    <>
+      <div className="w-full max-w-5xl mx-auto bg-white/10 backdrop-blur-sm rounded-2xl shadow-xl border border-white/20 p-6 relative z-10">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
 
         {/* Input Origem */}
         <div className="relative md:col-span-1">
@@ -125,9 +148,28 @@ export const SearchBar = () => {
           ) : (
             <Search className="mr-2 h-5 w-5" />
           )}
-          {isLoading ? "Buscando..." : "Buscar"}
+          {isLoading ? "Planejando..." : "Buscar"}
         </Button>
       </div>
     </div>
+
+    {/* OVERLAY DE CARREGAMENTO MAGNÍFICO */}
+    {isLoading && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-md transition-all duration-500">
+        <div className="flex flex-col items-center p-10 bg-white/10 rounded-3xl border border-white/20 shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in duration-300 max-w-md text-center">
+          <div className="relative mb-6">
+            <PlaneTakeoff className="h-16 w-16 text-white animate-bounce" />
+            <div className="absolute inset-0 bg-white blur-xl opacity-20 rounded-full animate-pulse"></div>
+          </div>
+          <h2 className="text-2xl md:text-3xl font-bold text-white mb-2 drop-shadow-md">
+            Planejando sua viagem...
+          </h2>
+          <p className="text-white/90 text-lg animate-pulse min-h-[60px] flex items-center justify-center">
+            {loadingText}
+          </p>
+        </div>
+      </div>
+    )}
+    </>
   );
 };

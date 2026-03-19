@@ -12,6 +12,7 @@ from typing import TypedDict, Annotated, List, Dict, Any
 import operator
 import re
 from langchain_core.exceptions import OutputParserException
+from datetime import datetime
 
 from pydantic import BaseModel, Field as PydanticV2Field
 
@@ -145,12 +146,36 @@ def extract_info_node(state: TravelAppState) -> dict:
         # Fallback simples (pode não ser necessário se o LLM for robusto)
         return { "error": f"Não foi possível processar a extração. Erro: {e}" }
 
+# --- Nó de Validação de Datas (NOVO) ---
+def validate_dates_node(state: TravelAppState) -> dict:
+    print("--- ⏱️ Validando as datas ---")
+    if state.get("error"):
+        return {"error": state.get("error")}
+        
+    start = state.get("start_date")
+    end = state.get("end_date")
+    
+    if not start or not end:
+        return {"error": "As datas de início e fim da viagem não foram encontradas no pedido."}
+
+    try:
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+        end_dt = datetime.strptime(end, "%Y-%m-%d")
+            
+        if end_dt < start_dt:
+            return {"error": "A data de retorno não pode ser antes da data de partida."}
+            
+    except ValueError:
+        return {"error": "Formato de data inválido. Use AAAA-MM-DD."}
+        
+    return {} # OK
+
 # --- Agentes de Busca (Atualizados para o novo estado) ---
 def flight_agent_node(state: TravelAppState) -> dict:
     print("--- ✈️ Agente de Voos: Chamando ferramenta ---")
     # ... (mesma lógica de verificação de erro) ...
     if state.get("error"):
-         return {"raw_flights": [], "error": state.get("error")}
+         return {"raw_flights": [{"id": "error", "error": state.get("error")}]}
          
     try:
         results = search_flights.invoke({
@@ -163,12 +188,12 @@ def flight_agent_node(state: TravelAppState) -> dict:
         return {"raw_flights": results} # Salva em raw_flights
     except Exception as e:
         print(f"Erro ao chamar ferramenta de voos: {e}")
-        return {"raw_flights": [], "error": f"Erro ao buscar voos: {e}"}
+        return {"raw_flights": [{"id": "error", "error": f"Erro ao buscar voos: {e}"}]}
 
 def hotel_agent_node(state: TravelAppState) -> dict:
     print("--- 🏨 Agente de Hospedagem: Chamando ferramenta ---")
     if state.get("error"):
-         return {"raw_hotels": [], "error": state.get("error")}
+         return {"raw_hotels": [{"id": "error", "error": state.get("error")}]}
 
     try:
         results = search_hotels.invoke({
@@ -179,13 +204,13 @@ def hotel_agent_node(state: TravelAppState) -> dict:
         return {"raw_hotels": results} # Salva em raw_hotels
     except Exception as e:
         print(f"Erro ao chamar ferramenta de hotéis: {e}")
-        return {"raw_hotels": [], "error": f"Erro ao buscar hotéis: {e}"}
+        return {"raw_hotels": [{"id": "error", "error": f"Erro ao buscar hotéis: {e}"}]}
 
 
 def activity_agent_node(state: TravelAppState) -> dict:
     print("--- 🗺️ Agente de Atividades: Chamando ferramenta ---")
     if state.get("error"):
-         return {"raw_activities": [], "error": state.get("error")}
+         return {"raw_activities": [{"id": "error", "error": state.get("error")}]}
 
     try:
         results = search_activities.invoke({
@@ -196,7 +221,7 @@ def activity_agent_node(state: TravelAppState) -> dict:
         return {"raw_activities": results} # Salva em raw_activities
     except Exception as e:
         print(f"Erro ao chamar ferramenta de atividades: {e}")
-        return {"raw_activities": [], "error": f"Erro ao buscar atividades: {e}"}
+        return {"raw_activities": [{"id": "error", "error": f"Erro ao buscar atividades: {e}"}]}
 
 
 # --- NÓ CURADOR (TOTALMENTE REFEITO) ---
@@ -205,15 +230,26 @@ def curate_and_report_node(state: TravelAppState) -> dict:
 
     initial_error = state.get("error")
     
-    # Filtra resultados que são erros
-    def filter_errors(results: List[Dict] | None) -> List[Dict]:
+    # Extrai erros reais das APIs para enviar ao LLM
+    def extract_error(results: List[Dict] | None) -> str | None:
+        if results:
+            for item in results:
+                if item.get("id") == "error":
+                    return item.get("airline") or item.get("error") or str(item)
+        return None
+        
+    def filter_valid(results: List[Dict] | None) -> List[Dict]:
         if not results:
             return []
         return [item for item in results if item.get("id") != "error"]
 
-    found_flights = filter_errors(state.get("raw_flights"))
-    found_hotels = filter_errors(state.get("raw_hotels"))
-    found_activities = filter_errors(state.get("raw_activities"))
+    found_flights = filter_valid(state.get("raw_flights"))
+    found_hotels = filter_valid(state.get("raw_hotels"))
+    found_activities = filter_valid(state.get("raw_activities"))
+    
+    flights_error = extract_error(state.get("raw_flights"))
+    hotels_error = extract_error(state.get("raw_hotels"))
+    activities_error = extract_error(state.get("raw_activities"))
 
     # Converte os resultados limpos para JSON para enviar ao LLM
     flights_json = json.dumps(found_flights, indent=2, ensure_ascii=False)
@@ -248,9 +284,21 @@ def curate_and_report_node(state: TravelAppState) -> dict:
     Hotéis: {hotels_json}
     Atividades: {activities_json}
 
+    --- ERROS REPORTADOS PELAS APIS (Informativo para o relatório) ---
+    Se houver erros abaixo, não inclua esse item, mas avise o usuário de forma amigável no sumário (e.g. "Não encontramos voos por X, mas veja hotéis!").
+    Erro Voos: {flights_error or 'Nenhum'}
+    Erro Hotéis: {hotels_error or 'Nenhum'}
+    Erro Atividades: {activities_error or 'Nenhum'}
+
+    --- CÁLCULO DE DIAS ---
+    Início: {state.get('start_date', 'Não extraído')}
+    Fim: {state.get('end_date', 'Não extraído')}
+
     --- SUA TAREFA ---
-    Analise as listas JSON acima. Selecione as MELHORES opções (1-2 voos, 2-3 hotéis, 4-5 atividades)
-    e justifique cada escolha (1-2 frases).
+    Analise as listas JSON fornecidas. Selecione as MELHORES opções de Viagem:
+    1. Voos: Escolha 1-2 voos.
+    2. Hotéis: Escolha 2-3 hotéis.
+    3. Atividades: Escolha exatamente **UMA ATIVIDADE DIFERENTE PARA CADA DIA DA VIAGEM** (calcule os dias entre {state.get('start_date')} e {state.get('end_date')}). Nas justificativas das atividades, inicie com "Dia X:" (ex: "Dia 1: Incrível para iniciar a viagem..."). Dê preferência a atrações do local exato, mas se acabarem as opções, sugira na região vizinha próxima!
     
     Se uma lista estiver vazia, retorne uma lista vazia para ela (ex: "curated_flights": []).
     
@@ -282,15 +330,22 @@ def curate_and_report_node(state: TravelAppState) -> dict:
 print("Construindo o gráfico de agentes LangGraph...")
 workflow = StateGraph(TravelAppState)
 workflow.add_node("extract_info", extract_info_node)
+workflow.add_node("validate_dates", validate_dates_node)
 workflow.add_node("flights", flight_agent_node)
 workflow.add_node("hotels", hotel_agent_node)
 workflow.add_node("activities", activity_agent_node)
 workflow.add_node("curate_and_report", curate_and_report_node) 
 
 workflow.set_entry_point("extract_info")
-workflow.add_edge("extract_info", "flights")
-workflow.add_edge("flights", "hotels")
-workflow.add_edge("hotels", "activities")
+workflow.add_edge("extract_info", "validate_dates")
+
+# Execução Paralela!
+workflow.add_edge("validate_dates", "flights")
+workflow.add_edge("validate_dates", "hotels")
+workflow.add_edge("validate_dates", "activities")
+
+workflow.add_edge("flights", "curate_and_report")
+workflow.add_edge("hotels", "curate_and_report")
 workflow.add_edge("activities", "curate_and_report")
 workflow.add_edge("curate_and_report", END)
 

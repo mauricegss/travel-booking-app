@@ -4,44 +4,44 @@ import json
 from langchain_core.tools import tool
 from pydantic.v1 import BaseModel, Field
 from serpapi import GoogleSearch
-from tavily import TavilyClient
+from functools import lru_cache
+from langchain_google_genai import ChatGoogleGenerativeAI
 from functools import lru_cache
 from app.tools.image_tools import search_image # <-- IMPORTAR FERRAMENTA DE IMAGEM
 
-# --- O Helper de IATA (Tavily) ---
+# --- O Helper de IATA (Gemini) ---
 @lru_cache(maxsize=100)
-def _get_iata_code(city_name: str) -> str | None:
-    try:
-        tavily_client = TavilyClient(api_key=os.environ["TAVILY_API_KEY"])
-    except KeyError:
-        print("ERRO (Voo-Helper): TAVILY_API_KEY não configurada.")
-        return None
-    
-    print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Tavily...")
-    query = f"""
-    Qual é o principal IATA code (código de aeroporto) para a cidade {city_name}?
-    Responda APENAS com um objeto JSON no formato: {{"iataCode": "XXX"}}
-    """
+def _get_iata_code(city_name: str) -> dict | None:
+    print(f"Tool (Voo-Helper): Buscando IATA para {city_name} usando Gemini 2.5 Flash...")
     
     try:
-        response = tavily_client.search(query=query, search_depth="basic", include_answer=True)
-        answer = response.get('answer')
+        llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0)
         
-        if answer:
-            print(f"Tavily (IATA) Answer: {answer}")
-            json_str = answer.strip().replace("```json", "").replace("```", "").strip()
-            data = json.loads(json_str)
+        prompt = f"""
+        Você é um especialista em aviação comercial.
+        A partir da cidade '{city_name}', qual é o aeroporto comercial DE GRANDE PORTE (HUB nacional/internacional) mais próximo que opera várias companhias e voos diários?
+        ATENÇÃO: Ignore aeroportos regionais pequenos, fazendas ou aeroclubes que não possuem malha ativa pesada.
+        Exemplo: Para Ponta Grossa, o correto é Curitiba CWB. Para Niterói, o correto é Rio de Janeiro GIG ou SDU.
+        
+        Responda APENAS com um objeto JSON estrito no seguinte formato:
+        {{"iataCode": "XXX", "cityName": "Nome real da cidade do Aeroporto", "isFallback": true_se_a_cidade_do_aeroporto_for_diferente_da_origem}}
+        """
+        
+        response = llm.invoke(prompt)
+        text = response.content.replace("```json", "").replace("```", "").strip()
+        data = json.loads(text)
 
-            if data.get('iataCode'):
-                iata = data['iataCode']
-                print(f"IATA Code extraído: {iata}")
-                return iata
-        
-        print(f"Tavily não retornou 'answer' ou JSON válido para o IATA de {city_name}.")
-        return None
+        if data.get('iataCode'):
+            iata = data['iataCode']
+            city = data.get('cityName', city_name)
+            is_fallback = data.get('isFallback', False)
+            print(f"IATA Code extraído via Gemini: {iata} (Cidade: {city}, Fallback: {is_fallback})")
+            return {"iata": iata, "city": city, "isFallback": is_fallback}
+            
     except Exception as e:
-        print(f"Erro ao buscar/processar IATA com Tavily: {e}")
-        return None
+        print(f"Erro ao processar IATA com Gemini: {e}")
+        
+    return None
 # --- Fim do Helper ---
 
 
@@ -69,14 +69,23 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
         error_msg = f"{e.args[0]} não configurada."
         return [{"id": "error", "airline": error_msg, "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
 
-    origin_iata = _get_iata_code(origin)
-    dest_iata = _get_iata_code(destination)
+    origin_data = _get_iata_code(origin)
+    dest_data = _get_iata_code(destination)
 
-    if not origin_iata:
+    if not origin_data:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para a origem: {origin}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
-    if not dest_iata:
+    if not dest_data:
         return [{"id": "error", "airline": f"Não foi possível encontrar o código IATA para o destino: {destination}", "departure": "", "arrival": "", "duration": "", "price": "R$ 0", "stops": 0, "image_url": None}]
 
+    origin_iata = origin_data["iata"]
+    dest_iata = dest_data["iata"]
+    
+    fallback_note = ""
+    if origin_data.get("isFallback"):
+        fallback_note += f"A origem {origin} não possui aeroporto principal, buscamos por {origin_data.get('city', origin_iata)} ({origin_iata}). "
+    if dest_data.get("isFallback"):
+        fallback_note += f"O destino {destination} não possui aeroporto principal, buscamos por {dest_data.get('city', dest_iata)} ({dest_iata})."
+    
     params = {
         "engine": "google_flights",
         "api_key": SERPAPI_KEY,
@@ -117,18 +126,44 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
                 continue 
 
             outbound_leg = legs[0]
-            departure_time = outbound_leg.get("departure_airport", {}).get("time", "N/A")
-            arrival_time = outbound_leg.get("arrival_airport", {}).get("time", "N/A")
-            airline_name = flight.get("airline_logo_text", outbound_leg.get("airline", "N/A"))
+            dep_airport = outbound_leg.get("departure_airport", {}).get("id", origin_iata)
+            arr_airport = outbound_leg.get("arrival_airport", {}).get("id", dest_iata)
+            
+            # Extract just the HH:MM from '2026-03-25 14:30'
+            dep_raw = outbound_leg.get('departure_airport', {}).get('time', 'N/A')
+            dep_time_str = dep_raw.split(" ")[1] if " " in dep_raw else dep_raw
+            
+            arr_raw = outbound_leg.get('arrival_airport', {}).get('time', 'N/A')
+            arr_time_str = arr_raw.split(" ")[1] if " " in arr_raw else arr_raw
+            
+            departure_time = f"{dep_time_str} ({dep_airport})"
+            arrival_time = f"{arr_time_str} ({arr_airport})"
 
             if return_date and len(legs) > 1:
                 return_leg = legs[1]
-                departure_time = f"Ida: {departure_time}"
-                arrival_time = f"Volta: {return_leg.get('departure_airport', {}).get('time', 'N/A')}"
+                ret_dep_airport = return_leg.get("departure_airport", {}).get("id", dest_iata)
+                
+                # Para mostrar Ida e Volta mantemos apenas origem -> destino (já que é só Partida/Chegada na UI)
+                # O usuário pediu expressamente pra tirar Ida e Volta e deixar apenas o horário
+                ret_dep_raw = return_leg.get('departure_airport', {}).get('time', 'N/A')
+                ret_dep_time_str = ret_dep_raw.split(" ")[1] if " " in ret_dep_raw else ret_dep_raw
+                
+                departure_time = f"{dep_time_str} ({dep_airport})"
+                arrival_time = f"{ret_dep_time_str} ({ret_dep_airport})"
             
+            # Formatar a duração para "Xh Ym"
+            duration_raw = flight.get("total_duration")
+            try:
+                duration_min = int(duration_raw)
+                h = duration_min // 60
+                m = duration_min % 60
+                formatted_duration = f"{h}h {m}m" if m > 0 else f"{h}h"
+            except (ValueError, TypeError):
+                formatted_duration = f"{duration_raw} min" if duration_raw else 'N/A'
+
             # --- NOVA ADIÇÃO: BUSCAR IMAGEM DA COMPANHIA ---
             # (Usamos o nome da companhia + "logo" para melhores resultados)
-            image_url = search_image.invoke({"query": f"{airline_name} logo"})
+            image_url = search_image.invoke({"query": f"{airline_name} logo aviacion"})
             # ----------------------------------------------
 
             formatted_results.append({
@@ -136,10 +171,11 @@ def search_flights(origin: str, destination: str, departure_date: str, **kwargs)
                 "airline": airline_name,
                 "departure": departure_time,
                 "arrival": arrival_time,
-                "duration": flight.get("total_duration", "N/A"),
+                "duration": formatted_duration,
                 "price": f"R$ {flight.get('price', 0)}", 
                 "stops": flight.get("stops", 0),
-                "image_url": image_url # <-- ANEXAR A IMAGEM
+                "image_url": image_url, # <-- ANEXAR A IMAGEM
+                "fallback_note": fallback_note.strip() if fallback_note else None
             })
         
         print(f"Retornando {len(formatted_results)} opções de voo da SerpAPI (com imagens).")
